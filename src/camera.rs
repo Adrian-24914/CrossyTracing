@@ -1,17 +1,10 @@
-use nalgebra_glm::{dot, Vec3};
+use crate::math::Vec3;
 
 pub struct Camera {
     pub eye: Vec3,
     pub target: Vec3,
     pub up: Vec3,
     pub fov_y: f32,
-}
-
-#[derive(Clone, Copy)]
-pub struct ProjectedPoint {
-    pub x: f32,
-    pub y: f32,
-    pub inverse_depth: f32,
 }
 
 impl Camera {
@@ -24,25 +17,15 @@ impl Camera {
         }
     }
 
-    pub fn project(&self, point: &Vec3, width: usize, height: usize) -> Option<ProjectedPoint> {
+    pub fn ray_direction(&self, x: usize, y: usize, width: usize, height: usize) -> Vec3 {
         let forward = (self.target - self.eye).normalize();
         let right = forward.cross(&self.up).normalize();
         let camera_up = right.cross(&forward);
-        let relative = point - self.eye;
-        let depth = dot(&relative, &forward);
-        if depth <= 0.1 {
-            return None;
-        }
-
         let aspect = width as f32 / height as f32;
-        let focal = 1.0 / (self.fov_y * 0.5).tan();
-        let ndc_x = dot(&relative, &right) * focal / (depth * aspect);
-        let ndc_y = dot(&relative, &camera_up) * focal / depth;
+        let scale = (self.fov_y * 0.5).tan();
+        let screen_x = (2.0 * (x as f32 + 0.5) / width as f32 - 1.0) * aspect * scale;
+        let screen_y = (1.0 - 2.0 * (y as f32 + 0.5) / height as f32) * scale;
 
-        Some(ProjectedPoint {
-            x: (ndc_x + 1.0) * 0.5 * width as f32,
-            y: (1.0 - ndc_y) * 0.5 * height as f32,
-            inverse_depth: 1.0 / depth,
-        })
+        (forward + right * screen_x + camera_up * screen_y).normalize()
     }
 }

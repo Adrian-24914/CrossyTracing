@@ -1,31 +1,21 @@
 mod camera;
 mod color;
 mod framebuffer;
+mod math;
+mod window;
 
 use camera::Camera;
 use color::Color;
 use framebuffer::Framebuffer;
-use minifb::{Key, Window, WindowOptions};
-use nalgebra_glm::Vec3;
-use std::f32::consts::FRAC_PI_4;
+use math::Vec3;
+use std::{f32::consts::FRAC_PI_4, thread, time::Duration};
+use window::NativeWindow;
 
 const WIDTH: usize = 800;
 const HEIGHT: usize = 600;
-const BACKGROUND: Color = Color::new(25, 31, 43);
 
 fn main() {
-    let mut window = Window::new(
-        "Creative Zone",
-        WIDTH,
-        HEIGHT,
-        WindowOptions {
-            resize: false,
-            ..WindowOptions::default()
-        },
-    )
-    .expect("No se pudo abrir la ventana");
-    window.set_target_fps(60);
-
+    let window = NativeWindow::new("Creative Zone - Raytracing", WIDTH, HEIGHT);
     let mut framebuffer = Framebuffer::new(WIDTH, HEIGHT);
     let camera = Camera::new(
         Vec3::new(8.5, 8.5, 11.5),
@@ -33,45 +23,26 @@ fn main() {
         FRAC_PI_4,
     );
 
-    while window.is_open() && !window.is_key_down(Key::Escape) {
-        framebuffer.clear(BACKGROUND);
-        draw_reference_grid(&mut framebuffer, &camera);
-        window
-            .update_with_buffer(&framebuffer.color, framebuffer.width, framebuffer.height)
-            .expect("No se pudo actualizar la ventana");
+    render_sky(&mut framebuffer, &camera);
+
+    while window.pump_messages() {
+        window.present(&framebuffer.color);
+        thread::sleep(Duration::from_millis(16));
     }
 }
 
-fn draw_reference_grid(framebuffer: &mut Framebuffer, camera: &Camera) {
-    let grid_color = Color::new(92, 170, 92).to_hex();
-    for z in -3..=3 {
-        for x in -3..=3 {
-            let point = Vec3::new(x as f32 * 1.35, 0.0, z as f32 * 1.35);
-            let Some(projected) = camera.project(&point, framebuffer.width, framebuffer.height)
-            else {
-                continue;
-            };
-
-            let center_x = projected.x as isize;
-            let center_y = projected.y as isize;
-            for offset_y in -2..=2 {
-                for offset_x in -2..=2 {
-                    let pixel_x = center_x + offset_x;
-                    let pixel_y = center_y + offset_y;
-                    if pixel_x >= 0
-                        && pixel_x < framebuffer.width as isize
-                        && pixel_y >= 0
-                        && pixel_y < framebuffer.height as isize
-                    {
-                        framebuffer.draw_depth_tested(
-                            pixel_x as usize,
-                            pixel_y as usize,
-                            projected.inverse_depth,
-                            grid_color,
-                        );
-                    }
-                }
-            }
+fn render_sky(framebuffer: &mut Framebuffer, camera: &Camera) {
+    framebuffer.clear(Color::new(25, 31, 43));
+    for y in 0..framebuffer.height {
+        for x in 0..framebuffer.width {
+            let ray = camera.ray_direction(x, y, framebuffer.width, framebuffer.height);
+            let blend = (ray.y * 0.5 + 0.5).clamp(0.0, 1.0);
+            let color = Color::new(
+                (35.0 + 65.0 * blend) as u8,
+                (45.0 + 90.0 * blend) as u8,
+                (65.0 + 125.0 * blend) as u8,
+            );
+            framebuffer.set_pixel(x, y, color.to_hex());
         }
     }
 }
