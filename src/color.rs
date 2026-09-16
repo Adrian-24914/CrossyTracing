@@ -13,4 +13,13 @@ impl Color {
     pub const fn to_hex(self) -> u32 {
         ((self.r as u32) << 16) | ((self.g as u32) << 8) | self.b as u32
     }
+
+    pub fn lit(self, intensity: f32) -> Self {
+        let intensity = intensity.clamp(0.0, 1.0);
+        Self::new(
+            (self.r as f32 * intensity) as u8,
+            (self.g as f32 * intensity) as u8,
+            (self.b as f32 * intensity) as u8,
+        )
+    }
 }

@@ -1,11 +1,15 @@
 mod camera;
 mod color;
+mod cube;
 mod framebuffer;
 mod math;
+mod ray;
+mod renderer;
 mod window;
 
 use camera::Camera;
 use color::Color;
+use cube::Cube;
 use framebuffer::Framebuffer;
 use math::Vec3;
 use std::{f32::consts::FRAC_PI_4, thread, time::Duration};
@@ -22,27 +26,33 @@ fn main() {
         Vec3::new(0.0, 0.0, 0.0),
         FRAC_PI_4,
     );
+    let cubes = [
+        Cube::new(
+            Vec3::new(0.0, -0.5, 0.0),
+            Vec3::new(6.0, 1.0, 6.0),
+            Color::new(92, 170, 92),
+        ),
+        Cube::new(
+            Vec3::new(-1.5, 0.55, -0.8),
+            Vec3::new(1.0, 1.1, 1.0),
+            Color::new(217, 106, 67),
+        ),
+        Cube::new(
+            Vec3::new(0.0, 0.8, 0.4),
+            Vec3::new(1.0, 1.6, 1.0),
+            Color::new(238, 242, 246),
+        ),
+        Cube::new(
+            Vec3::new(1.6, 0.35, -1.2),
+            Vec3::new(0.8, 0.7, 0.8),
+            Color::new(107, 123, 138),
+        ),
+    ];
 
-    render_sky(&mut framebuffer, &camera);
+    renderer::render(&mut framebuffer, &camera, &cubes);
 
     while window.pump_messages() {
         window.present(&framebuffer.color);
         thread::sleep(Duration::from_millis(16));
-    }
-}
-
-fn render_sky(framebuffer: &mut Framebuffer, camera: &Camera) {
-    framebuffer.clear(Color::new(25, 31, 43));
-    for y in 0..framebuffer.height {
-        for x in 0..framebuffer.width {
-            let ray = camera.ray_direction(x, y, framebuffer.width, framebuffer.height);
-            let blend = (ray.y * 0.5 + 0.5).clamp(0.0, 1.0);
-            let color = Color::new(
-                (35.0 + 65.0 * blend) as u8,
-                (45.0 + 90.0 * blend) as u8,
-                (65.0 + 125.0 * blend) as u8,
-            );
-            framebuffer.set_pixel(x, y, color.to_hex());
-        }
     }
 }

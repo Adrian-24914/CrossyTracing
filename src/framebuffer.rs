@@ -1,5 +1,3 @@
-use crate::color::Color;
-
 pub struct Framebuffer {
     pub width: usize,
     pub height: usize,
@@ -13,10 +11,6 @@ impl Framebuffer {
             height,
             color: vec![0; width * height],
         }
-    }
-
-    pub fn clear(&mut self, color: Color) {
-        self.color.fill(color.to_hex());
     }
 
     pub fn set_pixel(&mut self, x: usize, y: usize, color: u32) {
