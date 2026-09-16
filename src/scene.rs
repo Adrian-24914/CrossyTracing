@@ -15,7 +15,7 @@ pub fn build_scene(game: &Game) -> Scene {
     let mut cubes = Vec::with_capacity(LANE_COUNT * (TILE_COLUMNS + 1));
 
     for (lane_index, lane) in game.lanes.iter().enumerate() {
-        let lane_z = game.lane_z(lane_index);
+        let (lane_y, lane_z) = game.lane_position(lane_index);
         let base_color = match lane.kind {
             LaneKind::Grass => Color::new(92, 170, 92),
             LaneKind::Stone => Color::new(107, 123, 138),
@@ -28,7 +28,7 @@ pub fn build_scene(game: &Game) -> Scene {
                 tint(base_color, 10)
             };
             cubes.push(Cube::new(
-                Vec3::new(column_x(column), -0.68, lane_z),
+                Vec3::new(column_x(column), lane_y - 0.68, lane_z),
                 Vec3::new(TILE_SPACING - 0.02, 1.64, TILE_SPACING - 0.02),
                 color,
             ));
@@ -36,7 +36,7 @@ pub fn build_scene(game: &Game) -> Scene {
 
         if let Some(column) = lane.obstacle_column {
             cubes.push(Cube::new(
-                Vec3::new(column_x(column), 0.55, lane_z),
+                Vec3::new(column_x(column), lane_y + 0.55, lane_z),
                 Vec3::new(0.72, 0.82, 0.72),
                 Color::new(217, 106, 67),
             ));
@@ -51,13 +51,17 @@ pub fn build_scene(game: &Game) -> Scene {
 
 fn player_spheres(game: &Game) -> Vec<Sphere> {
     let x = column_x(game.player_column);
-    let z = game.lane_z(game.player_lane);
-    let white = Color::new(238, 242, 246);
+    let (lane_y, z) = game.lane_position(game.player_lane);
+    let white = if game.game_over {
+        Color::new(190, 118, 118)
+    } else {
+        Color::new(238, 242, 246)
+    };
 
     vec![
-        Sphere::new(Vec3::new(x, 0.47, z), 0.66, white),
-        Sphere::new(Vec3::new(x, 0.91, z), 0.50, white),
-        Sphere::new(Vec3::new(x, 1.25, z), 0.36, white),
+        Sphere::new(Vec3::new(x, lane_y + 0.47, z), 0.66, white),
+        Sphere::new(Vec3::new(x, lane_y + 0.91, z), 0.50, white),
+        Sphere::new(Vec3::new(x, lane_y + 1.25, z), 0.36, white),
     ]
 }
 
