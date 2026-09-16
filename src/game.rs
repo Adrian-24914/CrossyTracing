@@ -27,6 +27,7 @@ pub struct Game {
     pub lanes: Vec<Lane>,
     pub player_column: usize,
     pub player_lane: usize,
+    pub paused: bool,
 }
 
 impl Game {
@@ -54,6 +55,7 @@ impl Game {
             lanes,
             player_column: TILE_COLUMNS / 2,
             player_lane,
+            paused: false,
         }
     }
 
@@ -62,6 +64,9 @@ impl Game {
     }
 
     pub fn try_move(&mut self, direction: Move) -> bool {
+        if self.paused {
+            return false;
+        }
         let (column, lane) = match direction {
             Move::Left if self.player_column > 0 => (self.player_column - 1, self.player_lane),
             Move::Right if self.player_column + 1 < TILE_COLUMNS => {
@@ -80,6 +85,10 @@ impl Game {
         self.player_column = column;
         self.player_lane = lane;
         true
+    }
+
+    pub fn toggle_pause(&mut self) {
+        self.paused = !self.paused;
     }
 }
 
@@ -107,6 +116,15 @@ mod tests {
         let mut game = Game::new();
         let blocked_column = game.player_column - 1;
         game.lanes[game.player_lane].obstacle_column = Some(blocked_column);
+
+        assert!(!game.try_move(Move::Left));
+        assert_eq!(game.player_column, TILE_COLUMNS / 2);
+    }
+
+    #[test]
+    fn paused_game_blocks_player_movement() {
+        let mut game = Game::new();
+        game.toggle_pause();
 
         assert!(!game.try_move(Move::Left));
         assert_eq!(game.player_column, TILE_COLUMNS / 2);

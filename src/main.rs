@@ -23,7 +23,7 @@ const HEIGHT: usize = 600;
 fn main() {
     let window = NativeWindow::new("Creative Zone - Raytracing", WIDTH, HEIGHT);
     let mut framebuffer = Framebuffer::new(WIDTH, HEIGHT);
-    let camera = OrbitCamera::new(
+    let mut camera = OrbitCamera::new(
         Vec3::new(8.5, 8.5, 11.5),
         Vec3::new(0.0, 0.0, 0.0),
         FRAC_PI_4,
@@ -37,18 +37,50 @@ fn main() {
         let Some(keys) = window.pump_messages() else {
             break;
         };
-        let mut moved = false;
-        for key in keys {
-            let direction = match key {
-                Key::Left => Move::Left,
-                Key::Right => Move::Right,
-                Key::Up => Move::Forward,
-                Key::Down => Move::Backward,
+        if keys.iter().any(|key| matches!(key, Key::Pause)) {
+            game.toggle_pause();
+            let title = if game.paused {
+                "Creative Zone | PAUSA: A/D rotar, W/S zoom"
+            } else {
+                "Creative Zone | WASD/Flechas mover, Espacio pausar"
             };
-            moved |= game.try_move(direction);
+            window.set_title(title);
         }
 
-        if moved {
+        let mut changed = false;
+        if game.paused {
+            if window.is_key_down(Key::Left) {
+                camera.orbit_y(-0.035);
+                changed = true;
+            }
+            if window.is_key_down(Key::Right) {
+                camera.orbit_y(0.035);
+                changed = true;
+            }
+            if window.is_key_down(Key::Up) {
+                camera.zoom(-0.18);
+                changed = true;
+            }
+            if window.is_key_down(Key::Down) {
+                camera.zoom(0.18);
+                changed = true;
+            }
+        } else {
+            for key in keys {
+                let direction = match key {
+                    Key::Left => Some(Move::Left),
+                    Key::Right => Some(Move::Right),
+                    Key::Up => Some(Move::Forward),
+                    Key::Down => Some(Move::Backward),
+                    Key::Pause => None,
+                };
+                if let Some(direction) = direction {
+                    changed |= game.try_move(direction);
+                }
+            }
+        }
+
+        if changed {
             scene = scene::build_scene(&game);
             renderer::render(&mut framebuffer, &camera, &scene.cubes, &scene.spheres);
         }

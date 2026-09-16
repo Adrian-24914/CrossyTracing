@@ -28,4 +28,46 @@ impl OrbitCamera {
 
         (forward + right * screen_x + camera_up * screen_y).normalize()
     }
+
+    pub fn orbit_y(&mut self, angle: f32) {
+        let offset = self.eye - self.target;
+        let cosine = angle.cos();
+        let sine = angle.sin();
+        self.eye = self.target
+            + Vec3::new(
+                offset.x * cosine - offset.z * sine,
+                offset.y,
+                offset.x * sine + offset.z * cosine,
+            );
+    }
+
+    pub fn zoom(&mut self, amount: f32) {
+        let offset = self.eye - self.target;
+        let distance = offset.dot(offset).sqrt();
+        let new_distance = (distance + amount).clamp(5.0, 30.0);
+        self.eye = self.target + offset.normalize() * new_distance;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn orbit_preserves_distance_and_zoom_changes_it() {
+        let mut camera =
+            OrbitCamera::new(Vec3::new(8.0, 6.0, 10.0), Vec3::new(0.0, 0.0, 0.0), 0.75);
+        let initial_offset = camera.eye - camera.target;
+        let initial_distance = initial_offset.dot(initial_offset).sqrt();
+
+        camera.orbit_y(0.4);
+        let orbit_offset = camera.eye - camera.target;
+        let orbit_distance = orbit_offset.dot(orbit_offset).sqrt();
+        assert!((initial_distance - orbit_distance).abs() < 0.0001);
+
+        camera.zoom(-1.0);
+        let zoom_offset = camera.eye - camera.target;
+        let zoom_distance = zoom_offset.dot(zoom_offset).sqrt();
+        assert!(zoom_distance < orbit_distance);
+    }
 }

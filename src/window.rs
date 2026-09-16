@@ -17,6 +17,7 @@ const DIB_RGB_COLORS: u32 = 0;
 const SRCCOPY: u32 = 0x00CC_0020;
 const IDC_ARROW: *const u16 = 32512usize as *const u16;
 const VK_ESCAPE: usize = 0x1B;
+const VK_SPACE: usize = 0x20;
 const VK_LEFT: usize = 0x25;
 const VK_UP: usize = 0x26;
 const VK_RIGHT: usize = 0x27;
@@ -28,6 +29,7 @@ pub enum Key {
     Right,
     Up,
     Down,
+    Pause,
 }
 
 #[repr(C)]
@@ -133,6 +135,8 @@ extern "system" {
     fn DispatchMessageW(message: *const Message) -> isize;
     fn GetDC(window: Handle) -> Handle;
     fn ReleaseDC(window: Handle, device_context: Handle) -> i32;
+    fn GetAsyncKeyState(virtual_key: i32) -> i16;
+    fn SetWindowTextW(window: Handle, text: *const u16) -> i32;
 }
 
 #[link(name = "kernel32")]
@@ -238,6 +242,7 @@ impl NativeWindow {
                         0x44 | VK_RIGHT => pressed.push(Key::Right),
                         0x57 | VK_UP => pressed.push(Key::Up),
                         0x53 | VK_DOWN => pressed.push(Key::Down),
+                        VK_SPACE => pressed.push(Key::Pause),
                         _ => {}
                     }
                 }
@@ -246,6 +251,25 @@ impl NativeWindow {
             }
         }
         Some(pressed)
+    }
+
+    pub fn is_key_down(&self, key: Key) -> bool {
+        unsafe {
+            match key {
+                Key::Left => key_down(0x41) || key_down(VK_LEFT),
+                Key::Right => key_down(0x44) || key_down(VK_RIGHT),
+                Key::Up => key_down(0x57) || key_down(VK_UP),
+                Key::Down => key_down(0x53) || key_down(VK_DOWN),
+                Key::Pause => key_down(VK_SPACE),
+            }
+        }
+    }
+
+    pub fn set_title(&self, title: &str) {
+        let title = wide(title);
+        unsafe {
+            SetWindowTextW(self.handle, title.as_ptr());
+        }
     }
 
     pub fn present(&self, pixels: &[u32]) {
@@ -315,4 +339,8 @@ unsafe extern "system" fn window_procedure(
 
 fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(Some(0)).collect()
+}
+
+unsafe fn key_down(virtual_key: usize) -> bool {
+    GetAsyncKeyState(virtual_key as i32) < 0
 }
