@@ -1,15 +1,13 @@
-use crate::{color::Color, math::Vec3, ray::Ray};
+use crate::{
+    color::Color,
+    math::Vec3,
+    ray::{Hit, Ray},
+};
 
 pub struct Cube {
     pub min: Vec3,
     pub max: Vec3,
     pub color: Color,
-}
-
-#[derive(Clone, Copy)]
-pub struct Hit {
-    pub distance: f32,
-    pub normal: Vec3,
 }
 
 impl Cube {

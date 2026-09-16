@@ -1,13 +1,13 @@
 use crate::math::Vec3;
 
-pub struct Camera {
+pub struct OrbitCamera {
     pub eye: Vec3,
     pub target: Vec3,
     pub up: Vec3,
     pub fov_y: f32,
 }
 
-impl Camera {
+impl OrbitCamera {
     pub fn new(eye: Vec3, target: Vec3, fov_y: f32) -> Self {
         Self {
             eye,

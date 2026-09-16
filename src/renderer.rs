@@ -1,23 +1,29 @@
 use crate::{
-    camera::Camera,
     color::Color,
-    cube::{Cube, Hit},
+    cube::Cube,
     framebuffer::Framebuffer,
     math::Vec3,
-    ray::Ray,
+    orbit_camera::OrbitCamera,
+    ray::{Hit, Ray},
+    sphere::Sphere,
 };
 
 const AMBIENT_LIGHT: f32 = 0.22;
 
-pub fn render(framebuffer: &mut Framebuffer, camera: &Camera, cubes: &[Cube]) {
+pub fn render(
+    framebuffer: &mut Framebuffer,
+    camera: &OrbitCamera,
+    cubes: &[Cube],
+    spheres: &[Sphere],
+) {
     let light_direction = Vec3::new(-0.45, 0.85, 0.35).normalize();
 
     for y in 0..framebuffer.height {
         for x in 0..framebuffer.width {
             let direction = camera.ray_direction(x, y, framebuffer.width, framebuffer.height);
             let ray = Ray::new(camera.eye, direction);
-            let color = match closest_hit(&ray, cubes) {
-                Some((hit, cube)) => shade(hit, cube.color, light_direction),
+            let color = match closest_hit(&ray, cubes, spheres) {
+                Some((hit, color)) => shade(hit, color, light_direction),
                 None => sky_color(direction),
             };
             framebuffer.set_pixel(x, y, color.to_hex());
@@ -25,8 +31,8 @@ pub fn render(framebuffer: &mut Framebuffer, camera: &Camera, cubes: &[Cube]) {
     }
 }
 
-fn closest_hit<'a>(ray: &Ray, cubes: &'a [Cube]) -> Option<(Hit, &'a Cube)> {
-    let mut closest: Option<(Hit, &Cube)> = None;
+fn closest_hit(ray: &Ray, cubes: &[Cube], spheres: &[Sphere]) -> Option<(Hit, Color)> {
+    let mut closest: Option<(Hit, Color)> = None;
     for cube in cubes {
         let Some(hit) = cube.intersect(ray) else {
             continue;
@@ -35,7 +41,18 @@ fn closest_hit<'a>(ray: &Ray, cubes: &'a [Cube]) -> Option<(Hit, &'a Cube)> {
             .as_ref()
             .is_none_or(|(current, _)| hit.distance < current.distance)
         {
-            closest = Some((hit, cube));
+            closest = Some((hit, cube.color));
+        }
+    }
+    for sphere in spheres {
+        let Some(hit) = sphere.intersect(ray) else {
+            continue;
+        };
+        if closest
+            .as_ref()
+            .is_none_or(|(current, _)| hit.distance < current.distance)
+        {
+            closest = Some((hit, sphere.color));
         }
     }
     closest
@@ -63,7 +80,7 @@ mod tests {
     #[test]
     fn cube_changes_pixels_in_front_of_the_camera() {
         let mut framebuffer = Framebuffer::new(80, 60);
-        let camera = Camera::new(
+        let camera = OrbitCamera::new(
             Vec3::new(4.0, 4.0, 5.0),
             Vec3::new(0.0, 0.0, 0.0),
             FRAC_PI_4,
@@ -74,7 +91,7 @@ mod tests {
             Color::new(220, 80, 60),
         )];
 
-        render(&mut framebuffer, &camera, &cubes);
+        render(&mut framebuffer, &camera, &cubes, &[]);
 
         let visible_pixels = framebuffer
             .color

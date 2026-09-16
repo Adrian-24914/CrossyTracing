@@ -3,10 +3,16 @@ use crate::{
     cube::Cube,
     game::{Game, LaneKind, LANE_COUNT, TILE_COLUMNS, TILE_SPACING},
     math::Vec3,
+    sphere::Sphere,
 };
 
-pub fn build_scene(game: &Game) -> Vec<Cube> {
-    let mut scene = Vec::with_capacity(LANE_COUNT * (TILE_COLUMNS + 1) + 3);
+pub struct Scene {
+    pub cubes: Vec<Cube>,
+    pub spheres: Vec<Sphere>,
+}
+
+pub fn build_scene(game: &Game) -> Scene {
+    let mut cubes = Vec::with_capacity(LANE_COUNT * (TILE_COLUMNS + 1));
 
     for (lane_index, lane) in game.lanes.iter().enumerate() {
         let lane_z = game.lane_z(lane_index);
@@ -21,7 +27,7 @@ pub fn build_scene(game: &Game) -> Vec<Cube> {
             } else {
                 tint(base_color, 10)
             };
-            scene.push(Cube::new(
+            cubes.push(Cube::new(
                 Vec3::new(column_x(column), -0.68, lane_z),
                 Vec3::new(TILE_SPACING - 0.02, 1.64, TILE_SPACING - 0.02),
                 color,
@@ -29,7 +35,7 @@ pub fn build_scene(game: &Game) -> Vec<Cube> {
         }
 
         if let Some(column) = lane.obstacle_column {
-            scene.push(Cube::new(
+            cubes.push(Cube::new(
                 Vec3::new(column_x(column), 0.55, lane_z),
                 Vec3::new(0.72, 0.82, 0.72),
                 Color::new(217, 106, 67),
@@ -37,30 +43,22 @@ pub fn build_scene(game: &Game) -> Vec<Cube> {
         }
     }
 
-    add_player(&mut scene, game);
-    scene
+    Scene {
+        cubes,
+        spheres: player_spheres(game),
+    }
 }
 
-fn add_player(scene: &mut Vec<Cube>, game: &Game) {
+fn player_spheres(game: &Game) -> Vec<Sphere> {
     let x = column_x(game.player_column);
     let z = game.lane_z(game.player_lane);
     let white = Color::new(238, 242, 246);
 
-    scene.push(Cube::new(
-        Vec3::new(x, 0.45, z),
-        Vec3::new(0.66, 0.66, 0.66),
-        white,
-    ));
-    scene.push(Cube::new(
-        Vec3::new(x, 0.88, z),
-        Vec3::new(0.50, 0.50, 0.50),
-        white,
-    ));
-    scene.push(Cube::new(
-        Vec3::new(x, 1.22, z),
-        Vec3::new(0.36, 0.36, 0.36),
-        white,
-    ));
+    vec![
+        Sphere::new(Vec3::new(x, 0.47, z), 0.66, white),
+        Sphere::new(Vec3::new(x, 0.91, z), 0.50, white),
+        Sphere::new(Vec3::new(x, 1.25, z), 0.36, white),
+    ]
 }
 
 fn column_x(column: usize) -> f32 {
@@ -83,6 +81,7 @@ mod tests {
     fn scene_contains_every_tile_and_the_player() {
         let game = Game::new();
         let scene = build_scene(&game);
-        assert!(scene.len() >= LANE_COUNT * TILE_COLUMNS + 3);
+        assert!(scene.cubes.len() >= LANE_COUNT * TILE_COLUMNS);
+        assert_eq!(scene.spheres.len(), 3);
     }
 }
