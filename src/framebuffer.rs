@@ -12,9 +12,4 @@ impl Framebuffer {
             color: vec![0; width * height],
         }
     }
-
-    pub fn set_pixel(&mut self, x: usize, y: usize, color: u32) {
-        let index = y * self.width + x;
-        self.color[index] = color;
-    }
 }

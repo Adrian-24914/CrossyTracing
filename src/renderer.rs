@@ -7,6 +7,7 @@ use crate::{
     ray::{Hit, Ray},
     sphere::Sphere,
 };
+use std::thread;
 
 const AMBIENT_LIGHT: f32 = 0.22;
 
@@ -17,18 +18,37 @@ pub fn render(
     spheres: &[Sphere],
 ) {
     let light_direction = Vec3::new(-0.45, 0.85, 0.35).normalize();
+    let width = framebuffer.width;
+    let height = framebuffer.height;
+    let thread_count = thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(1)
+        .min(height);
+    let rows_per_thread = height.div_ceil(thread_count);
 
-    for y in 0..framebuffer.height {
-        for x in 0..framebuffer.width {
-            let direction = camera.ray_direction(x, y, framebuffer.width, framebuffer.height);
-            let ray = Ray::new(camera.eye, direction);
-            let color = match closest_hit(&ray, cubes, spheres) {
-                Some((hit, color)) => shade(hit, color, light_direction),
-                None => sky_color(direction),
-            };
-            framebuffer.set_pixel(x, y, color.to_hex());
+    thread::scope(|scope| {
+        for (chunk_index, pixels) in framebuffer
+            .color
+            .chunks_mut(width * rows_per_thread)
+            .enumerate()
+        {
+            let start_y = chunk_index * rows_per_thread;
+            scope.spawn(move || {
+                for (local_y, row) in pixels.chunks_mut(width).enumerate() {
+                    let y = start_y + local_y;
+                    for (x, pixel) in row.iter_mut().enumerate() {
+                        let direction = camera.ray_direction(x, y, width, height);
+                        let ray = Ray::new(camera.eye, direction);
+                        let color = match closest_hit(&ray, cubes, spheres) {
+                            Some((hit, color)) => shade(hit, color, light_direction),
+                            None => sky_color(direction),
+                        };
+                        *pixel = color.to_hex();
+                    }
+                }
+            });
         }
-    }
+    });
 }
 
 fn closest_hit(ray: &Ray, cubes: &[Cube], spheres: &[Sphere]) -> Option<(Hit, Color)> {
