@@ -11,11 +11,11 @@ mod sphere;
 mod window;
 
 use framebuffer::Framebuffer;
-use game::Game;
+use game::{Game, Move};
 use math::Vec3;
 use orbit_camera::OrbitCamera;
 use std::{f32::consts::FRAC_PI_4, thread, time::Duration};
-use window::NativeWindow;
+use window::{Key, NativeWindow};
 
 const WIDTH: usize = 800;
 const HEIGHT: usize = 600;
@@ -28,12 +28,30 @@ fn main() {
         Vec3::new(0.0, 0.0, 0.0),
         FRAC_PI_4,
     );
-    let game = Game::new();
-    let scene = scene::build_scene(&game);
+    let mut game = Game::new();
+    let mut scene = scene::build_scene(&game);
 
     renderer::render(&mut framebuffer, &camera, &scene.cubes, &scene.spheres);
 
-    while window.pump_messages() {
+    loop {
+        let Some(keys) = window.pump_messages() else {
+            break;
+        };
+        let mut moved = false;
+        for key in keys {
+            let direction = match key {
+                Key::Left => Move::Left,
+                Key::Right => Move::Right,
+                Key::Up => Move::Forward,
+                Key::Down => Move::Backward,
+            };
+            moved |= game.try_move(direction);
+        }
+
+        if moved {
+            scene = scene::build_scene(&game);
+            renderer::render(&mut framebuffer, &camera, &scene.cubes, &scene.spheres);
+        }
         window.present(&framebuffer.color);
         thread::sleep(Duration::from_millis(16));
     }

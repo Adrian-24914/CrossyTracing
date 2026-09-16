@@ -10,11 +10,25 @@ const PM_REMOVE: u32 = 0x0001;
 const WM_CLOSE: u32 = 0x0010;
 const WM_DESTROY: u32 = 0x0002;
 const WM_QUIT: u32 = 0x0012;
+const WM_KEYDOWN: u32 = 0x0100;
 const SW_SHOW: i32 = 5;
 const BI_RGB: u32 = 0;
 const DIB_RGB_COLORS: u32 = 0;
 const SRCCOPY: u32 = 0x00CC_0020;
 const IDC_ARROW: *const u16 = 32512usize as *const u16;
+const VK_ESCAPE: usize = 0x1B;
+const VK_LEFT: usize = 0x25;
+const VK_UP: usize = 0x26;
+const VK_RIGHT: usize = 0x27;
+const VK_DOWN: usize = 0x28;
+
+#[derive(Clone, Copy)]
+pub enum Key {
+    Left,
+    Right,
+    Up,
+    Down,
+}
 
 #[repr(C)]
 struct Point {
@@ -206,18 +220,32 @@ impl NativeWindow {
         }
     }
 
-    pub fn pump_messages(&self) -> bool {
+    pub fn pump_messages(&self) -> Option<Vec<Key>> {
+        let mut pressed = Vec::new();
         unsafe {
             let mut message: Message = zeroed();
             while PeekMessageW(&mut message, 0, 0, 0, PM_REMOVE) != 0 {
                 if message.message == WM_QUIT {
-                    return false;
+                    return None;
+                }
+                if message.message == WM_KEYDOWN && message.l_param & (1 << 30) == 0 {
+                    match message.w_param {
+                        VK_ESCAPE => {
+                            DestroyWindow(self.handle);
+                            return None;
+                        }
+                        0x41 | VK_LEFT => pressed.push(Key::Left),
+                        0x44 | VK_RIGHT => pressed.push(Key::Right),
+                        0x57 | VK_UP => pressed.push(Key::Up),
+                        0x53 | VK_DOWN => pressed.push(Key::Down),
+                        _ => {}
+                    }
                 }
                 TranslateMessage(&message);
                 DispatchMessageW(&message);
             }
         }
-        true
+        Some(pressed)
     }
 
     pub fn present(&self, pixels: &[u32]) {
