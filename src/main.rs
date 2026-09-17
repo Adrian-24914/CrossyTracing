@@ -10,6 +10,7 @@ mod ray;
 mod renderer;
 mod scene;
 mod sphere;
+mod train;
 mod window;
 mod world;
 

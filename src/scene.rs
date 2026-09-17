@@ -5,8 +5,11 @@ use crate::{
     game::{Game, LANE_COUNT, TILE_COLUMNS, TILE_SPACING},
     math::Vec3,
     sphere::Sphere,
-    world::{Environment, ForestSectionKind, LaneKind, SectionKind},
+    train::{add_train, TRAIN_LENGTH},
+    world::{Environment, ForestSectionKind, LaneKind, RailwayPhase, RailwayState, SectionKind},
 };
+
+const WORLD_HALF_WIDTH: f32 = TILE_COLUMNS as f32 * TILE_SPACING * 0.5;
 
 pub struct Scene {
     pub cubes: Vec<Cube>,
@@ -33,6 +36,7 @@ pub fn build_scene(game: &Game) -> Scene {
             }
             (SectionKind::Forest(_), LaneKind::Stone) => Color::new(107, 123, 112),
             (SectionKind::River, LaneKind::Water) => Color::new(52, 129, 164),
+            (SectionKind::Railway, LaneKind::Rail) => Color::new(89, 84, 78),
             _ => Color::new(92, 145, 102),
         };
 
@@ -41,11 +45,13 @@ pub fn build_scene(game: &Game) -> Scene {
             SectionKind::Forest(ForestSectionKind::Grove) => Color::new(132, 82, 52),
             SectionKind::Forest(ForestSectionKind::Thicket) => Color::new(99, 68, 48),
             SectionKind::River => Color::new(137, 84, 48),
+            SectionKind::Railway => Color::new(78, 73, 68),
         };
 
         let (tile_y, tile_height) = match lane.environment {
             Environment::Forest => (lane_y - 0.68, 1.64),
             Environment::River => (lane_y - 0.80, 1.38),
+            Environment::Railway => (lane_y - 0.71, 1.52),
         };
 
         for column in 0..TILE_COLUMNS {
@@ -83,6 +89,42 @@ pub fn build_scene(game: &Game) -> Scene {
                     ));
                 }
             }
+            Environment::Railway => {
+                for column in 0..TILE_COLUMNS {
+                    cubes.push(Cube::new(
+                        Vec3::new(column_x(column), lane_y + 0.12, lane_z),
+                        Vec3::new(0.22, 0.12, 1.02),
+                        Color::new(104, 70, 47),
+                    ));
+                }
+                for z_offset in [-0.31, 0.31] {
+                    cylinders.push(Cylinder::new_x(
+                        Vec3::new(0.0, lane_y + 0.24, lane_z + z_offset),
+                        TILE_COLUMNS as f32 * TILE_SPACING,
+                        0.12,
+                        Color::new(151, 157, 157),
+                    ));
+                }
+
+                if let Some(railway) = &lane.railway {
+                    add_railway_signals(&mut cubes, &mut spheres, lane_y, lane_z, railway);
+                    if railway.phase == RailwayPhase::Crossing {
+                        let progress =
+                            (railway.elapsed / crate::game::TRAIN_CROSSING_SECONDS).clamp(0.0, 1.0);
+                        let outside_center = WORLD_HALF_WIDTH + TRAIN_LENGTH * 0.5;
+                        let center_x = railway.direction.sign()
+                            * (-outside_center + 2.0 * outside_center * progress);
+                        add_train(
+                            &mut cubes,
+                            center_x,
+                            lane_y,
+                            lane_z,
+                            railway.direction,
+                            WORLD_HALF_WIDTH,
+                        );
+                    }
+                }
+            }
         }
     }
 
@@ -91,6 +133,35 @@ pub fn build_scene(game: &Game) -> Scene {
         cubes,
         spheres,
         cylinders,
+    }
+}
+
+fn add_railway_signals(
+    cubes: &mut Vec<Cube>,
+    spheres: &mut Vec<Sphere>,
+    lane_y: f32,
+    lane_z: f32,
+    railway: &RailwayState,
+) {
+    let warning_on = railway.phase == RailwayPhase::Warning
+        && ((railway.elapsed / 0.20).floor() as u32).is_multiple_of(2);
+    let light_color = if warning_on {
+        Color::new(255, 45, 28)
+    } else {
+        Color::new(82, 29, 24)
+    };
+
+    for x in [-WORLD_HALF_WIDTH + 0.18, WORLD_HALF_WIDTH - 0.18] {
+        cubes.push(Cube::new(
+            Vec3::new(x, lane_y + 0.57, lane_z + 0.49),
+            Vec3::new(0.10, 0.86, 0.10),
+            Color::new(55, 58, 56),
+        ));
+        spheres.push(Sphere::new(
+            Vec3::new(x, lane_y + 0.93, lane_z + 0.49),
+            0.24,
+            light_color,
+        ));
     }
 }
 
@@ -151,7 +222,7 @@ mod tests {
         let game = Game::new();
         let scene = build_scene(&game);
         assert!(scene.cubes.len() >= LANE_COUNT * TILE_COLUMNS);
-        assert_eq!(scene.spheres.len(), 3);
+        assert!(scene.spheres.len() >= 3);
         assert!(!scene.cylinders.is_empty());
     }
 

@@ -1,7 +1,8 @@
 use crate::{
     random::Random,
     world::{
-        Environment, ForestSectionKind, Lane, LaneKind, Section, SectionKind, SectionSignature,
+        Environment, ForestSectionKind, Lane, LaneKind, RailwayPhase, RailwayState, Section,
+        SectionKind, SectionSignature, TrainDirection,
     },
 };
 use std::{
@@ -18,6 +19,11 @@ const DROP_START: f32 = 0.52;
 const RECENT_SECTION_LIMIT: usize = 6;
 const BOARD_ATTEMPTS: usize = 512;
 const SECTION_ATTEMPTS: usize = 96;
+const RAILWAY_CHANCE_PERCENT: usize = 10;
+const RIVER_CHANCE_PERCENT: usize = 35;
+pub const RAILWAY_REST_SECONDS: f32 = 5.5;
+pub const RAILWAY_WARNING_SECONDS: f32 = 1.5;
+pub const TRAIN_CROSSING_SECONDS: f32 = 1.35;
 
 #[derive(Clone, Copy)]
 pub enum Move {
@@ -76,12 +82,43 @@ impl Game {
         if self.paused || self.game_over || delta_seconds <= 0.0 {
             return false;
         }
+        self.update_railways(delta_seconds);
         self.cycle += delta_seconds / self.cycle_seconds();
         while self.cycle >= 1.0 {
             self.cycle -= 1.0;
             self.recycle_front_lane();
         }
         true
+    }
+
+    fn update_railways(&mut self, delta_seconds: f32) {
+        for lane in &mut self.lanes {
+            let Some(railway) = &mut lane.railway else {
+                continue;
+            };
+
+            railway.elapsed += delta_seconds;
+            loop {
+                let duration = match railway.phase {
+                    RailwayPhase::Rest => RAILWAY_REST_SECONDS,
+                    RailwayPhase::Warning => RAILWAY_WARNING_SECONDS,
+                    RailwayPhase::Crossing => TRAIN_CROSSING_SECONDS,
+                };
+                if railway.elapsed < duration {
+                    break;
+                }
+
+                railway.elapsed -= duration;
+                railway.phase = match railway.phase {
+                    RailwayPhase::Rest => RailwayPhase::Warning,
+                    RailwayPhase::Warning => RailwayPhase::Crossing,
+                    RailwayPhase::Crossing => {
+                        railway.direction = railway.direction.opposite();
+                        RailwayPhase::Rest
+                    }
+                };
+            }
+        }
     }
 
     pub fn lane_position(&self, lane: usize) -> (f32, f32) {
@@ -114,8 +151,12 @@ impl Game {
             return false;
         }
         let supported = self.lanes[lane].supports_player(column);
-        if lane < self.player_lane && supported {
-            self.score += 1;
+        if supported {
+            if lane < self.player_lane {
+                self.score += 1;
+            } else if lane > self.player_lane {
+                self.score = self.score.saturating_sub(1);
+            }
         }
         self.player_column = column;
         self.player_lane = lane;
@@ -175,12 +216,6 @@ impl Game {
         let mut stream = Vec::with_capacity(LANE_COUNT + 3);
         let starting_forest = self.generate_forest_section();
         stream.extend(starting_forest.lanes);
-        while stream.len() < 3 {
-            let forest = self.generate_forest_section();
-            stream.extend(forest.lanes);
-        }
-        let first_river = self.generate_river_section();
-        stream.extend(first_river.lanes);
         while stream.len() < LANE_COUNT {
             let section = self.generate_next_section();
             stream.extend(section.lanes);
@@ -229,17 +264,19 @@ impl Game {
     }
 
     fn generate_next_section(&mut self) -> Section {
-        let previous_was_river = self
+        let previous_was_crossing = self
             .recent_sections
             .back()
-            .map(|section| section.kind == SectionKind::River)
+            .map(|section| matches!(section.kind, SectionKind::River | SectionKind::Railway))
             .unwrap_or(false);
-        let river_chance = match self.score {
-            0..=9 => 22,
-            10..=34 => 28,
-            _ => 34,
-        };
-        if !previous_was_river && self.random.range(100) < river_chance {
+        if previous_was_crossing {
+            return self.generate_forest_section();
+        }
+
+        let roll = self.random.range(100);
+        if roll < RAILWAY_CHANCE_PERCENT {
+            self.generate_railway_section()
+        } else if roll < RAILWAY_CHANCE_PERCENT + RIVER_CHANCE_PERCENT {
             self.generate_river_section()
         } else {
             self.generate_forest_section()
@@ -289,6 +326,31 @@ impl Game {
         }
 
         let section = fallback.unwrap_or_else(|| self.generate_river_section_candidate(section_id));
+        self.accept_section(&section.signature);
+        section
+    }
+
+    fn generate_railway_section(&mut self) -> Section {
+        let section_id = self.next_section_id;
+        let direction = if self.random.range(2) == 0 {
+            TrainDirection::LeftToRight
+        } else {
+            TrainDirection::RightToLeft
+        };
+        let lane = Lane {
+            environment: Environment::Railway,
+            section_kind: SectionKind::Railway,
+            section_id,
+            kind: LaneKind::Rail,
+            obstacle_columns: Vec::new(),
+            platform_columns: Vec::new(),
+            railway: Some(RailwayState {
+                phase: RailwayPhase::Warning,
+                elapsed: 0.0,
+                direction,
+            }),
+        };
+        let section = Section::new(vec![lane], SectionKind::Railway);
         self.accept_section(&section.signature);
         section
     }
@@ -383,6 +445,7 @@ impl Game {
             },
             obstacle_columns,
             platform_columns: Vec::new(),
+            railway: None,
         }
     }
 
@@ -404,6 +467,7 @@ impl Game {
             kind: LaneKind::Water,
             obstacle_columns: Vec::new(),
             platform_columns,
+            railway: None,
         }
     }
 
@@ -414,7 +478,7 @@ impl Game {
                 .rev()
                 .find_map(|section| match section.kind {
                     SectionKind::Forest(kind) => Some(kind),
-                    SectionKind::River => None,
+                    SectionKind::River | SectionKind::Railway => None,
                 });
         for _ in 0..12 {
             let roll = self.random.range(100);
@@ -491,11 +555,11 @@ impl Game {
 
     fn cycle_seconds(&self) -> f32 {
         match self.score {
-            0..=9 => 1.25,
-            10..=19 => 1.05,
-            20..=34 => 0.88,
-            35..=49 => 0.72,
-            _ => 0.58,
+            0..=9 => 1.00,
+            10..=19 => 0.86,
+            20..=34 => 0.74,
+            35..=49 => 0.64,
+            _ => 0.54,
         }
     }
 }
@@ -629,6 +693,12 @@ fn smoothstep(value: f32) -> f32 {
 mod tests {
     use super::*;
 
+    fn place_test_railway(game: &mut Game) -> usize {
+        let railway = game.generate_railway_section().lanes.remove(0);
+        game.lanes[0] = railway;
+        0
+    }
+
     #[test]
     fn initial_board_has_a_path_that_requires_lateral_movement() {
         for seed in 0..100 {
@@ -644,17 +714,13 @@ mod tests {
     }
 
     #[test]
-    fn initial_board_has_a_safe_start_and_a_visible_river() {
+    fn initial_board_has_a_safe_start() {
         let game = Game::with_seed(99);
         assert_eq!(
             game.lanes[game.player_lane].environment,
             Environment::Forest
         );
         assert!(game.lanes[game.player_lane].supports_player(game.player_column));
-        assert!(game
-            .lanes
-            .iter()
-            .any(|lane| lane.environment == Environment::River));
         for lane in &game.lanes {
             match lane.environment {
                 Environment::Forest => {
@@ -666,6 +732,7 @@ mod tests {
                 Environment::River => {
                     assert!((3..=4).contains(&lane.platform_columns.len()))
                 }
+                Environment::Railway => assert!(lane.obstacle_columns.is_empty()),
             }
         }
 
@@ -753,9 +820,8 @@ mod tests {
     fn player_can_move_to_an_empty_tile() {
         let mut game = Game::with_seed(1);
         game.player_column = 3;
-        game.lanes[game.player_lane]
-            .obstacle_columns
-            .retain(|column| *column != 2);
+        let lane = game.generate_forest_lane(700, ForestSectionKind::Clearing, 0, None);
+        game.lanes[game.player_lane] = lane;
         assert!(game.try_move(Move::Left));
         assert_eq!(game.player_column, 2);
     }
@@ -764,6 +830,8 @@ mod tests {
     fn player_cannot_enter_an_obstacle() {
         let mut game = Game::with_seed(1);
         game.player_column = 3;
+        let lane = game.generate_forest_lane(701, ForestSectionKind::Clearing, 1, Some(3));
+        game.lanes[game.player_lane] = lane;
         game.lanes[game.player_lane].obstacle_columns = vec![2];
         assert!(!game.try_move(Move::Left));
         assert_eq!(game.player_column, 3);
@@ -795,9 +863,42 @@ mod tests {
                     game.lanes[target_lane].platform_columns.push(player_column);
                 }
             }
+            Environment::Railway => {}
         }
         assert!(game.try_move(Move::Forward));
         assert_eq!(game.score, 1);
+    }
+
+    #[test]
+    fn moving_backward_removes_the_point_before_it_can_be_recovered() {
+        let mut game = Game::with_seed(5);
+        let current_lane = game.player_lane;
+        let back_lane = current_lane + 1;
+        game.lanes[current_lane] =
+            game.generate_forest_lane(800, ForestSectionKind::Clearing, 0, None);
+        game.lanes[back_lane] =
+            game.generate_forest_lane(801, ForestSectionKind::Clearing, 0, None);
+        game.score = 7;
+
+        assert!(game.try_move(Move::Backward));
+        assert_eq!(game.score, 6);
+        assert!(game.try_move(Move::Forward));
+        assert_eq!(game.score, 7);
+        assert!(game.try_move(Move::Backward));
+        assert!(game.try_move(Move::Forward));
+        assert_eq!(game.score, 7);
+    }
+
+    #[test]
+    fn moving_backward_never_makes_the_score_underflow() {
+        let mut game = Game::with_seed(5);
+        let back_lane = game.player_lane + 1;
+        game.lanes[back_lane] =
+            game.generate_forest_lane(802, ForestSectionKind::Clearing, 0, None);
+        game.score = 0;
+
+        assert!(game.try_move(Move::Backward));
+        assert_eq!(game.score, 0);
     }
 
     #[test]
@@ -833,6 +934,86 @@ mod tests {
         assert!(game.try_move(Move::Forward));
         assert!(!game.game_over);
         assert_eq!(game.player_lane, target_lane);
+    }
+
+    #[test]
+    fn railway_is_safe_across_the_whole_row() {
+        let mut game = Game::with_seed(24);
+        let railway = game.generate_railway_section();
+        assert_eq!(railway.lanes.len(), 1);
+        assert!((0..TILE_COLUMNS).all(|column| railway.lanes[0].supports_player(column)));
+        let state = railway.lanes[0].railway.as_ref().unwrap();
+        assert_eq!(state.phase, RailwayPhase::Warning);
+        assert_eq!(state.elapsed, 0.0);
+    }
+
+    #[test]
+    fn environment_generation_uses_the_requested_distribution() {
+        assert_eq!(RAILWAY_CHANCE_PERCENT, 10);
+        assert_eq!(RIVER_CHANCE_PERCENT, 35);
+        assert_eq!(100 - RAILWAY_CHANCE_PERCENT - RIVER_CHANCE_PERCENT, 55);
+    }
+
+    #[test]
+    fn railway_warns_before_the_train_crosses() {
+        let mut game = Game::with_seed(24);
+        let railway_index = place_test_railway(&mut game);
+        let railway = game.lanes[railway_index].railway.as_mut().unwrap();
+        railway.phase = RailwayPhase::Rest;
+        railway.elapsed = RAILWAY_REST_SECONDS - 0.05;
+
+        game.update_railways(0.06);
+        let railway = game.lanes[railway_index].railway.as_ref().unwrap();
+        assert_eq!(railway.phase, RailwayPhase::Warning);
+        assert!(railway.elapsed < 0.02);
+
+        game.update_railways(RAILWAY_WARNING_SECONDS);
+        assert_eq!(
+            game.lanes[railway_index].railway.as_ref().unwrap().phase,
+            RailwayPhase::Crossing
+        );
+    }
+
+    #[test]
+    fn pause_freezes_the_railway_cycle() {
+        let mut game = Game::with_seed(24);
+        let railway_index = place_test_railway(&mut game);
+        let before = game.lanes[railway_index].railway.clone().unwrap();
+
+        game.toggle_pause();
+        assert!(!game.update(1.0));
+        assert_eq!(game.lanes[railway_index].railway.as_ref().unwrap(), &before);
+    }
+
+    #[test]
+    fn each_train_crosses_in_the_opposite_direction() {
+        let mut game = Game::with_seed(24);
+        let railway_index = place_test_railway(&mut game);
+        let railway = game.lanes[railway_index].railway.as_mut().unwrap();
+        railway.phase = RailwayPhase::Crossing;
+        railway.elapsed = TRAIN_CROSSING_SECONDS - 0.05;
+        let first_direction = railway.direction;
+
+        game.update_railways(0.06);
+        let railway = game.lanes[railway_index].railway.as_ref().unwrap();
+        assert_eq!(railway.phase, RailwayPhase::Rest);
+        assert_eq!(railway.direction, first_direction.opposite());
+    }
+
+    #[test]
+    fn crossings_are_separated_by_forest_sections() {
+        let mut game = Game::with_seed(25);
+        let mut previous_kind = None;
+        for _ in 0..100 {
+            let section = game.generate_next_section();
+            let current_kind = section.signature.kind;
+            let previous_was_crossing = previous_kind
+                .is_some_and(|kind| matches!(kind, SectionKind::River | SectionKind::Railway));
+            let current_is_crossing =
+                matches!(current_kind, SectionKind::River | SectionKind::Railway);
+            assert!(!(previous_was_crossing && current_is_crossing));
+            previous_kind = Some(current_kind);
+        }
     }
 
     #[test]
