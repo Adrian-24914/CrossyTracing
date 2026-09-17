@@ -4,11 +4,13 @@ mod framebuffer;
 mod game;
 mod math;
 mod orbit_camera;
+mod random;
 mod ray;
 mod renderer;
 mod scene;
 mod sphere;
 mod window;
+mod world;
 
 use framebuffer::Framebuffer;
 use game::{Game, Move};

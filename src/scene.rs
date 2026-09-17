@@ -1,9 +1,10 @@
 use crate::{
     color::Color,
     cube::Cube,
-    game::{Game, LaneKind, LANE_COUNT, TILE_COLUMNS, TILE_SPACING},
+    game::{Game, LANE_COUNT, TILE_COLUMNS, TILE_SPACING},
     math::Vec3,
     sphere::Sphere,
+    world::{Environment, ForestSectionKind, LaneKind},
 };
 
 pub struct Scene {
@@ -12,13 +13,27 @@ pub struct Scene {
 }
 
 pub fn build_scene(game: &Game) -> Scene {
-    let mut cubes = Vec::with_capacity(LANE_COUNT * (TILE_COLUMNS + 1));
+    let mut cubes = Vec::with_capacity(LANE_COUNT * (TILE_COLUMNS + 3));
 
     for (lane_index, lane) in game.lanes.iter().enumerate() {
         let (lane_y, lane_z) = game.lane_position(lane_index);
-        let base_color = match lane.kind {
-            LaneKind::Grass => Color::new(92, 170, 92),
-            LaneKind::Stone => Color::new(107, 123, 138),
+        let base_color = match (lane.environment, lane.section_kind, lane.kind) {
+            (Environment::Forest, ForestSectionKind::Clearing, LaneKind::Grass) => {
+                Color::new(111, 177, 91)
+            }
+            (Environment::Forest, ForestSectionKind::Grove, LaneKind::Grass) => {
+                Color::new(78, 145, 82)
+            }
+            (Environment::Forest, ForestSectionKind::Thicket, LaneKind::Grass) => {
+                Color::new(58, 119, 72)
+            }
+            (Environment::Forest, _, LaneKind::Stone) => Color::new(107, 123, 112),
+        };
+
+        let obstacle_color = match lane.section_kind {
+            ForestSectionKind::Clearing => Color::new(166, 105, 62),
+            ForestSectionKind::Grove => Color::new(132, 82, 52),
+            ForestSectionKind::Thicket => Color::new(99, 68, 48),
         };
 
         for column in 0..TILE_COLUMNS {
@@ -34,11 +49,11 @@ pub fn build_scene(game: &Game) -> Scene {
             ));
         }
 
-        if let Some(column) = lane.obstacle_column {
+        for &column in &lane.obstacle_columns {
             cubes.push(Cube::new(
                 Vec3::new(column_x(column), lane_y + 0.55, lane_z),
                 Vec3::new(0.72, 0.82, 0.72),
-                Color::new(217, 106, 67),
+                obstacle_color,
             ));
         }
     }
