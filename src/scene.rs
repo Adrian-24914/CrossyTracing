@@ -2,14 +2,12 @@ use crate::{
     color::Color,
     cube::Cube,
     cylinder::Cylinder,
-    game::{Game, LANE_COUNT, TILE_COLUMNS, TILE_SPACING},
+    game::{Game, LANE_COUNT, TILE_COLUMNS, TILE_SPACING, WORLD_HALF_WIDTH},
     math::Vec3,
     sphere::Sphere,
-    train::{add_train, TRAIN_LENGTH},
+    train::{add_train, train_center_x},
     world::{Environment, ForestSectionKind, LaneKind, RailwayPhase, RailwayState, SectionKind},
 };
-
-const WORLD_HALF_WIDTH: f32 = TILE_COLUMNS as f32 * TILE_SPACING * 0.5;
 
 pub struct Scene {
     pub cubes: Vec<Cube>,
@@ -111,9 +109,8 @@ pub fn build_scene(game: &Game) -> Scene {
                     if railway.phase == RailwayPhase::Crossing {
                         let progress =
                             (railway.elapsed / crate::game::TRAIN_CROSSING_SECONDS).clamp(0.0, 1.0);
-                        let outside_center = WORLD_HALF_WIDTH + TRAIN_LENGTH * 0.5;
-                        let center_x = railway.direction.sign()
-                            * (-outside_center + 2.0 * outside_center * progress);
+                        let center_x =
+                            train_center_x(progress, railway.direction, WORLD_HALF_WIDTH);
                         add_train(
                             &mut cubes,
                             center_x,

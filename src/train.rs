@@ -2,6 +2,22 @@ use crate::{color::Color, cube::Cube, math::Vec3, world::TrainDirection};
 
 pub const TRAIN_LENGTH: f32 = 4.2;
 
+pub fn train_center_x(progress: f32, direction: TrainDirection, world_half_width: f32) -> f32 {
+    let outside_center = world_half_width + TRAIN_LENGTH * 0.5;
+    direction.sign() * (-outside_center + 2.0 * outside_center * progress.clamp(0.0, 1.0))
+}
+
+pub fn train_x_bounds(
+    progress: f32,
+    direction: TrainDirection,
+    world_half_width: f32,
+) -> Option<(f32, f32)> {
+    let center_x = train_center_x(progress, direction, world_half_width);
+    let minimum_x = (center_x - TRAIN_LENGTH * 0.5).max(-world_half_width);
+    let maximum_x = (center_x + TRAIN_LENGTH * 0.5).min(world_half_width);
+    (maximum_x > minimum_x).then_some((minimum_x, maximum_x))
+}
+
 pub fn add_train(
     cubes: &mut Vec<Cube>,
     center_x: f32,

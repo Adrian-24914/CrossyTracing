@@ -1,5 +1,6 @@
 use crate::{
     random::Random,
+    train::train_x_bounds,
     world::{
         Environment, ForestSectionKind, Lane, LaneKind, RailwayPhase, RailwayState, Section,
         SectionKind, SectionSignature, TrainDirection,
@@ -15,7 +16,9 @@ pub const TILE_COLUMNS: usize = GRID_SIZE;
 pub const LANE_COUNT: usize = GRID_SIZE;
 pub const TILE_SPACING: f32 = 1.35;
 pub const BACK_Z: f32 = -4.05;
+pub const WORLD_HALF_WIDTH: f32 = TILE_COLUMNS as f32 * TILE_SPACING * 0.5;
 const DROP_START: f32 = 0.52;
+const PLAYER_COLLISION_RADIUS: f32 = 0.33;
 const RECENT_SECTION_LIMIT: usize = 6;
 const BOARD_ATTEMPTS: usize = 512;
 const SECTION_ATTEMPTS: usize = 96;
@@ -23,7 +26,7 @@ const RAILWAY_CHANCE_PERCENT: usize = 10;
 const RIVER_CHANCE_PERCENT: usize = 35;
 pub const RAILWAY_REST_SECONDS: f32 = 5.5;
 pub const RAILWAY_WARNING_SECONDS: f32 = 1.5;
-pub const TRAIN_CROSSING_SECONDS: f32 = 1.35;
+pub const TRAIN_CROSSING_SECONDS: f32 = 1.10;
 
 #[derive(Clone, Copy)]
 pub enum Move {
@@ -88,7 +91,31 @@ impl Game {
             self.cycle -= 1.0;
             self.recycle_front_lane();
         }
+        self.check_train_collision();
         true
+    }
+
+    fn check_train_collision(&mut self) {
+        let lane = &self.lanes[self.player_lane];
+        let Some(railway) = &lane.railway else {
+            return;
+        };
+        if railway.phase != RailwayPhase::Crossing {
+            return;
+        }
+
+        let progress = (railway.elapsed / TRAIN_CROSSING_SECONDS).clamp(0.0, 1.0);
+        let Some((train_min, train_max)) =
+            train_x_bounds(progress, railway.direction, WORLD_HALF_WIDTH)
+        else {
+            return;
+        };
+        let player_x = column_x(self.player_column);
+        if player_x + PLAYER_COLLISION_RADIUS >= train_min
+            && player_x - PLAYER_COLLISION_RADIUS <= train_max
+        {
+            self.game_over = true;
+        }
     }
 
     fn update_railways(&mut self, delta_seconds: f32) {
@@ -135,6 +162,7 @@ impl Game {
         if self.paused || self.game_over {
             return false;
         }
+        let previous_lane = self.player_lane;
         let (column, lane) = match direction {
             Move::Left if self.player_column > 0 => (self.player_column - 1, self.player_lane),
             Move::Right if self.player_column + 1 < TILE_COLUMNS => {
@@ -151,17 +179,19 @@ impl Game {
             return false;
         }
         let supported = self.lanes[lane].supports_player(column);
-        if supported {
-            if lane < self.player_lane {
-                self.score += 1;
-            } else if lane > self.player_lane {
-                self.score = self.score.saturating_sub(1);
-            }
-        }
         self.player_column = column;
         self.player_lane = lane;
         if !supported {
             self.game_over = true;
+        } else {
+            self.check_train_collision();
+            if !self.game_over {
+                if lane < previous_lane {
+                    self.score += 1;
+                } else if lane > previous_lane {
+                    self.score = self.score.saturating_sub(1);
+                }
+            }
         }
         true
     }
@@ -689,14 +719,18 @@ fn smoothstep(value: f32) -> f32 {
     value * value * (3.0 - 2.0 * value)
 }
 
+fn column_x(column: usize) -> f32 {
+    (column as f32 - (TILE_COLUMNS as f32 - 1.0) * 0.5) * TILE_SPACING
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn place_test_railway(game: &mut Game) -> usize {
+    fn place_test_railway(game: &mut Game, lane_index: usize) -> usize {
         let railway = game.generate_railway_section().lanes.remove(0);
-        game.lanes[0] = railway;
-        0
+        game.lanes[lane_index] = railway;
+        lane_index
     }
 
     #[test]
@@ -957,7 +991,7 @@ mod tests {
     #[test]
     fn railway_warns_before_the_train_crosses() {
         let mut game = Game::with_seed(24);
-        let railway_index = place_test_railway(&mut game);
+        let railway_index = place_test_railway(&mut game, 0);
         let railway = game.lanes[railway_index].railway.as_mut().unwrap();
         railway.phase = RailwayPhase::Rest;
         railway.elapsed = RAILWAY_REST_SECONDS - 0.05;
@@ -977,7 +1011,7 @@ mod tests {
     #[test]
     fn pause_freezes_the_railway_cycle() {
         let mut game = Game::with_seed(24);
-        let railway_index = place_test_railway(&mut game);
+        let railway_index = place_test_railway(&mut game, 0);
         let before = game.lanes[railway_index].railway.clone().unwrap();
 
         game.toggle_pause();
@@ -988,7 +1022,7 @@ mod tests {
     #[test]
     fn each_train_crosses_in_the_opposite_direction() {
         let mut game = Game::with_seed(24);
-        let railway_index = place_test_railway(&mut game);
+        let railway_index = place_test_railway(&mut game, 0);
         let railway = game.lanes[railway_index].railway.as_mut().unwrap();
         railway.phase = RailwayPhase::Crossing;
         railway.elapsed = TRAIN_CROSSING_SECONDS - 0.05;
@@ -998,6 +1032,59 @@ mod tests {
         let railway = game.lanes[railway_index].railway.as_ref().unwrap();
         assert_eq!(railway.phase, RailwayPhase::Rest);
         assert_eq!(railway.direction, first_direction.opposite());
+    }
+
+    #[test]
+    fn crossing_train_hits_a_player_waiting_on_the_rails() {
+        let mut game = Game::with_seed(30);
+        let railway_index = game.player_lane;
+        place_test_railway(&mut game, railway_index);
+        let railway = game.lanes[railway_index].railway.as_mut().unwrap();
+        railway.phase = RailwayPhase::Crossing;
+        railway.elapsed = TRAIN_CROSSING_SECONDS * 0.5;
+
+        game.update(0.01);
+        assert!(game.game_over);
+    }
+
+    #[test]
+    fn warning_lights_do_not_hurt_the_player() {
+        let mut game = Game::with_seed(30);
+        let railway_index = game.player_lane;
+        place_test_railway(&mut game, railway_index);
+        let railway = game.lanes[railway_index].railway.as_mut().unwrap();
+        railway.phase = RailwayPhase::Warning;
+        railway.elapsed = 0.5;
+
+        game.update(0.01);
+        assert!(!game.game_over);
+    }
+
+    #[test]
+    fn train_does_not_hit_a_player_on_another_lane() {
+        let mut game = Game::with_seed(30);
+        let railway_index = game.player_lane - 1;
+        place_test_railway(&mut game, railway_index);
+        let railway = game.lanes[railway_index].railway.as_mut().unwrap();
+        railway.phase = RailwayPhase::Crossing;
+        railway.elapsed = TRAIN_CROSSING_SECONDS * 0.5;
+
+        game.update(0.01);
+        assert!(!game.game_over);
+    }
+
+    #[test]
+    fn walking_into_a_passing_train_ends_the_run_without_scoring() {
+        let mut game = Game::with_seed(30);
+        let railway_index = game.player_lane - 1;
+        place_test_railway(&mut game, railway_index);
+        let railway = game.lanes[railway_index].railway.as_mut().unwrap();
+        railway.phase = RailwayPhase::Crossing;
+        railway.elapsed = TRAIN_CROSSING_SECONDS * 0.5;
+
+        assert!(game.try_move(Move::Forward));
+        assert!(game.game_over);
+        assert_eq!(game.score, 0);
     }
 
     #[test]
