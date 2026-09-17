@@ -1,39 +1,51 @@
 use crate::{
     color::Color,
     cube::Cube,
+    cylinder::Cylinder,
     game::{Game, LANE_COUNT, TILE_COLUMNS, TILE_SPACING},
     math::Vec3,
     sphere::Sphere,
-    world::{Environment, ForestSectionKind, LaneKind},
+    world::{Environment, ForestSectionKind, LaneKind, SectionKind},
 };
 
 pub struct Scene {
     pub cubes: Vec<Cube>,
     pub spheres: Vec<Sphere>,
+    pub cylinders: Vec<Cylinder>,
 }
 
 pub fn build_scene(game: &Game) -> Scene {
     let mut cubes = Vec::with_capacity(LANE_COUNT * (TILE_COLUMNS + 3));
+    let mut spheres = Vec::new();
+    let mut cylinders = Vec::new();
 
     for (lane_index, lane) in game.lanes.iter().enumerate() {
         let (lane_y, lane_z) = game.lane_position(lane_index);
-        let base_color = match (lane.environment, lane.section_kind, lane.kind) {
-            (Environment::Forest, ForestSectionKind::Clearing, LaneKind::Grass) => {
+        let base_color = match (lane.section_kind, lane.kind) {
+            (SectionKind::Forest(ForestSectionKind::Clearing), LaneKind::Grass) => {
                 Color::new(111, 177, 91)
             }
-            (Environment::Forest, ForestSectionKind::Grove, LaneKind::Grass) => {
+            (SectionKind::Forest(ForestSectionKind::Grove), LaneKind::Grass) => {
                 Color::new(78, 145, 82)
             }
-            (Environment::Forest, ForestSectionKind::Thicket, LaneKind::Grass) => {
+            (SectionKind::Forest(ForestSectionKind::Thicket), LaneKind::Grass) => {
                 Color::new(58, 119, 72)
             }
-            (Environment::Forest, _, LaneKind::Stone) => Color::new(107, 123, 112),
+            (SectionKind::Forest(_), LaneKind::Stone) => Color::new(107, 123, 112),
+            (SectionKind::River, LaneKind::Water) => Color::new(52, 129, 164),
+            _ => Color::new(92, 145, 102),
         };
 
         let obstacle_color = match lane.section_kind {
-            ForestSectionKind::Clearing => Color::new(166, 105, 62),
-            ForestSectionKind::Grove => Color::new(132, 82, 52),
-            ForestSectionKind::Thicket => Color::new(99, 68, 48),
+            SectionKind::Forest(ForestSectionKind::Clearing) => Color::new(166, 105, 62),
+            SectionKind::Forest(ForestSectionKind::Grove) => Color::new(132, 82, 52),
+            SectionKind::Forest(ForestSectionKind::Thicket) => Color::new(99, 68, 48),
+            SectionKind::River => Color::new(137, 84, 48),
+        };
+
+        let (tile_y, tile_height) = match lane.environment {
+            Environment::Forest => (lane_y - 0.68, 1.64),
+            Environment::River => (lane_y - 0.80, 1.38),
         };
 
         for column in 0..TILE_COLUMNS {
@@ -43,25 +55,63 @@ pub fn build_scene(game: &Game) -> Scene {
                 tint(base_color, 10)
             };
             cubes.push(Cube::new(
-                Vec3::new(column_x(column), lane_y - 0.68, lane_z),
-                Vec3::new(TILE_SPACING - 0.02, 1.64, TILE_SPACING - 0.02),
+                Vec3::new(column_x(column), tile_y, lane_z),
+                Vec3::new(TILE_SPACING - 0.02, tile_height, TILE_SPACING - 0.02),
                 color,
             ));
         }
 
-        for &column in &lane.obstacle_columns {
-            cubes.push(Cube::new(
-                Vec3::new(column_x(column), lane_y + 0.55, lane_z),
-                Vec3::new(0.72, 0.82, 0.72),
-                obstacle_color,
-            ));
+        match lane.environment {
+            Environment::Forest => {
+                for &column in &lane.obstacle_columns {
+                    cubes.push(Cube::new(
+                        Vec3::new(column_x(column), lane_y + 0.55, lane_z),
+                        Vec3::new(0.72, 0.82, 0.72),
+                        obstacle_color,
+                    ));
+                }
+            }
+            Environment::River => {
+                for (start, end) in contiguous_runs(&lane.platform_columns) {
+                    let start_x = column_x(start);
+                    let end_x = column_x(end);
+                    cylinders.push(Cylinder::new_x(
+                        Vec3::new((start_x + end_x) * 0.5, lane_y + 0.13, lane_z),
+                        end_x - start_x + TILE_SPACING * 0.82,
+                        0.48,
+                        Color::new(137, 84, 48),
+                    ));
+                }
+            }
         }
     }
 
+    spheres.extend(player_spheres(game));
     Scene {
         cubes,
-        spheres: player_spheres(game),
+        spheres,
+        cylinders,
     }
+}
+
+fn contiguous_runs(columns: &[usize]) -> Vec<(usize, usize)> {
+    let Some(&first) = columns.first() else {
+        return Vec::new();
+    };
+    let mut runs = Vec::new();
+    let mut start = first;
+    let mut end = first;
+    for &column in &columns[1..] {
+        if column == end + 1 {
+            end = column;
+        } else {
+            runs.push((start, end));
+            start = column;
+            end = column;
+        }
+    }
+    runs.push((start, end));
+    runs
 }
 
 fn player_spheres(game: &Game) -> Vec<Sphere> {
@@ -102,5 +152,14 @@ mod tests {
         let scene = build_scene(&game);
         assert!(scene.cubes.len() >= LANE_COUNT * TILE_COLUMNS);
         assert_eq!(scene.spheres.len(), 3);
+        assert!(!scene.cylinders.is_empty());
+    }
+
+    #[test]
+    fn adjacent_platform_columns_share_one_visual_log() {
+        assert_eq!(
+            contiguous_runs(&[0, 1, 3, 5, 6]),
+            vec![(0, 1), (3, 3), (5, 6)]
+        );
     }
 }

@@ -1,5 +1,6 @@
 mod color;
 mod cube;
+mod cylinder;
 mod framebuffer;
 mod game;
 mod math;
@@ -38,7 +39,13 @@ fn main() {
     let mut scene = scene::build_scene(&game);
     let mut previous_frame = Instant::now();
 
-    renderer::render(&mut framebuffer, &camera, &scene.cubes, &scene.spheres);
+    renderer::render(
+        &mut framebuffer,
+        &camera,
+        &scene.cubes,
+        &scene.spheres,
+        &scene.cylinders,
+    );
     update_title(&window, &game);
 
     loop {
@@ -93,7 +100,13 @@ fn main() {
 
         if changed {
             scene = scene::build_scene(&game);
-            renderer::render(&mut framebuffer, &camera, &scene.cubes, &scene.spheres);
+            renderer::render(
+                &mut framebuffer,
+                &camera,
+                &scene.cubes,
+                &scene.spheres,
+                &scene.cylinders,
+            );
             update_title(&window, &game);
         }
         window.present(&framebuffer.color);

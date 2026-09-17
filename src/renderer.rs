@@ -1,6 +1,7 @@
 use crate::{
     color::Color,
     cube::Cube,
+    cylinder::Cylinder,
     framebuffer::Framebuffer,
     math::Vec3,
     orbit_camera::OrbitCamera,
@@ -16,6 +17,7 @@ pub fn render(
     camera: &OrbitCamera,
     cubes: &[Cube],
     spheres: &[Sphere],
+    cylinders: &[Cylinder],
 ) {
     let light_direction = Vec3::new(-0.45, 0.85, 0.35).normalize();
     let width = framebuffer.width;
@@ -39,7 +41,7 @@ pub fn render(
                     for (x, pixel) in row.iter_mut().enumerate() {
                         let direction = camera.ray_direction(x, y, width, height);
                         let ray = Ray::new(camera.eye, direction);
-                        let color = match closest_hit(&ray, cubes, spheres) {
+                        let color = match closest_hit(&ray, cubes, spheres, cylinders) {
                             Some((hit, color)) => shade(hit, color, light_direction),
                             None => sky_color(direction),
                         };
@@ -51,7 +53,12 @@ pub fn render(
     });
 }
 
-fn closest_hit(ray: &Ray, cubes: &[Cube], spheres: &[Sphere]) -> Option<(Hit, Color)> {
+fn closest_hit(
+    ray: &Ray,
+    cubes: &[Cube],
+    spheres: &[Sphere],
+    cylinders: &[Cylinder],
+) -> Option<(Hit, Color)> {
     let mut closest: Option<(Hit, Color)> = None;
     for cube in cubes {
         let Some(hit) = cube.intersect(ray) else {
@@ -73,6 +80,17 @@ fn closest_hit(ray: &Ray, cubes: &[Cube], spheres: &[Sphere]) -> Option<(Hit, Co
             .is_none_or(|(current, _)| hit.distance < current.distance)
         {
             closest = Some((hit, sphere.color));
+        }
+    }
+    for cylinder in cylinders {
+        let Some(hit) = cylinder.intersect(ray) else {
+            continue;
+        };
+        if closest
+            .as_ref()
+            .is_none_or(|(current, _)| hit.distance < current.distance)
+        {
+            closest = Some((hit, cylinder.color));
         }
     }
     closest
@@ -111,7 +129,7 @@ mod tests {
             Color::new(220, 80, 60),
         )];
 
-        render(&mut framebuffer, &camera, &cubes, &[]);
+        render(&mut framebuffer, &camera, &cubes, &[], &[]);
 
         let visible_pixels = framebuffer
             .color
