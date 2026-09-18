@@ -1,6 +1,7 @@
 use crate::{
     color::Color,
     cylinder::Cylinder,
+    material::Material,
     math::Vec3,
     ray::{Hit, Ray},
 };
@@ -87,12 +88,12 @@ impl Tree {
         &self.foliage_anchors
     }
 
-    pub fn intersect(&self, ray: &Ray) -> Option<(Hit, Color)> {
+    pub fn intersect(&self, ray: &Ray) -> Option<(Hit, Material)> {
         if ray_misses_sphere(ray, self.bounds_center, self.bounds_radius) {
             return None;
         }
 
-        let mut closest: Option<(Hit, Color)> = None;
+        let mut closest: Option<(Hit, Material)> = None;
         for cylinder in &self.cylinders {
             let Some(hit) = cylinder.intersect(ray) else {
                 continue;
@@ -101,7 +102,7 @@ impl Tree {
                 .as_ref()
                 .is_none_or(|(current, _)| hit.distance < current.distance)
             {
-                closest = Some((hit, cylinder.color));
+                closest = Some((hit, cylinder.material));
             }
         }
         closest

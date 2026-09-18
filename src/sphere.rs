@@ -1,5 +1,6 @@
 use crate::{
     color::Color,
+    material::Material,
     math::Vec3,
     ray::{Hit, Ray},
 };
@@ -7,15 +8,19 @@ use crate::{
 pub struct Sphere {
     pub center: Vec3,
     pub radius: f32,
-    pub color: Color,
+    pub material: Material,
 }
 
 impl Sphere {
     pub fn new(center: Vec3, diameter: f32, color: Color) -> Self {
+        Self::with_material(center, diameter, Material::matte(color))
+    }
+
+    pub fn with_material(center: Vec3, diameter: f32, material: Material) -> Self {
         Self {
             center,
             radius: diameter * 0.5,
-            color,
+            material,
         }
     }
 

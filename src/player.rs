@@ -3,6 +3,7 @@ use crate::{
     cube::Cube,
     cylinder::Cylinder,
     game::{Game, TILE_COLUMNS, TILE_SPACING},
+    material::Material,
     math::Vec3,
     scene::Scene,
     sphere::Sphere,
@@ -34,7 +35,7 @@ impl CharacterPalette {
         Self {
             head: Color::new(181, 70, 60),
             beak: Color::new(170, 61, 51),
-            eye_white: Color::new(240, 240, 230),
+            eye_white: Color::new(255, 255, 255),
             pupil: Color::new(12, 12, 12),
             torso: Color::new(218, 166, 48),
             hips: Color::new(39, 44, 91),
@@ -134,11 +135,11 @@ fn add_eye(scene: &mut Scene, base: Vec3, facing: Vec3, side: f32, palette: &Cha
 
     let right = facing.normalize().cross(&UP).normalize();
     let center = eye_center(base, facing, side);
-    scene.cylinders.push(Cylinder::new_between(
+    scene.cylinders.push(Cylinder::new_between_with_material(
         center - right * scaled(EYE_HALF_THICKNESS),
         center + right * scaled(EYE_HALF_THICKNESS),
         scaled(0.43),
-        palette.eye_white,
+        Material::unlit(palette.eye_white),
     ));
 }
 
@@ -155,11 +156,11 @@ fn add_pupil(scene: &mut Scene, base: Vec3, facing: Vec3, side: f32, palette: &C
 
     let right = facing.normalize().cross(&UP).normalize();
     let center = eye_center(base, facing, side) + right * scaled(PUPIL_OUTWARD_OFFSET * side);
-    scene.cylinders.push(Cylinder::new_between(
+    scene.cylinders.push(Cylinder::new_between_with_material(
         center - right * scaled(PUPIL_HALF_THICKNESS),
         center + right * scaled(PUPIL_HALF_THICKNESS),
         scaled(0.26),
-        palette.pupil,
+        Material::glossy(palette.pupil, 0.55, 36.0),
     ));
 }
 
@@ -321,6 +322,7 @@ fn column_x(column: usize) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::material::Finish;
 
     fn empty_scene() -> Scene {
         Scene {
@@ -344,6 +346,41 @@ mod tests {
         assert_eq!(scene.cubes.len(), 2);
         assert_eq!(scene.spheres.len(), 14);
         assert_eq!(scene.cylinders.len(), 14);
+    }
+
+    #[test]
+    fn eye_whites_are_unlit_while_the_body_stays_matte() {
+        let mut scene = empty_scene();
+        add_big_walk_character(
+            &mut scene,
+            Vec3::default(),
+            Vec3::new(0.0, 0.0, -1.0),
+            &CharacterPalette::big_walk(),
+        );
+
+        let unlit: Vec<_> = scene
+            .cylinders
+            .iter()
+            .filter(|part| part.material.finish == Finish::Unlit)
+            .collect();
+        let glossy_count = scene
+            .cylinders
+            .iter()
+            .filter(|part| part.material.finish == Finish::Glossy)
+            .count();
+        assert_eq!(unlit.len(), 2);
+        assert!(unlit
+            .iter()
+            .all(|part| part.material.albedo.to_hex() == 0xFFFFFF));
+        assert_eq!(glossy_count, 2);
+        assert!(scene
+            .cubes
+            .iter()
+            .all(|part| part.material.finish == Finish::Matte));
+        assert!(scene
+            .spheres
+            .iter()
+            .all(|part| part.material.finish == Finish::Matte));
     }
 
     #[test]

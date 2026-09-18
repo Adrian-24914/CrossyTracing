@@ -2,6 +2,7 @@ use crate::{
     color::Color,
     cube::Cube,
     cylinder::Cylinder,
+    material::Material,
     math::Vec3,
     ray::{Hit, Ray},
     sphere::Sphere,
@@ -26,7 +27,7 @@ impl ForestProp {
         }
     }
 
-    pub fn intersect(&self, ray: &Ray) -> Option<(Hit, Color)> {
+    pub fn intersect(&self, ray: &Ray) -> Option<(Hit, Material)> {
         match self {
             Self::Tree(tree) => tree.intersect(ray),
             Self::Rock(model) | Self::FallenLog(model) | Self::Bush(model) => model.intersect(ray),
@@ -50,20 +51,20 @@ pub(crate) struct CompoundObstacle {
 }
 
 impl CompoundObstacle {
-    fn intersect(&self, ray: &Ray) -> Option<(Hit, Color)> {
+    fn intersect(&self, ray: &Ray) -> Option<(Hit, Material)> {
         if ray_misses_sphere(ray, self.bounds_center, self.bounds_radius) {
             return None;
         }
 
-        let mut closest: Option<(Hit, Color)> = None;
+        let mut closest: Option<(Hit, Material)> = None;
         for cube in &self.cubes {
-            keep_closest(&mut closest, cube.intersect(ray), cube.color);
+            keep_closest(&mut closest, cube.intersect(ray), cube.material);
         }
         for sphere in &self.spheres {
-            keep_closest(&mut closest, sphere.intersect(ray), sphere.color);
+            keep_closest(&mut closest, sphere.intersect(ray), sphere.material);
         }
         for cylinder in &self.cylinders {
-            keep_closest(&mut closest, cylinder.intersect(ray), cylinder.color);
+            keep_closest(&mut closest, cylinder.intersect(ray), cylinder.material);
         }
         closest
     }
@@ -165,7 +166,7 @@ fn bush(base: Vec3) -> CompoundObstacle {
     }
 }
 
-fn keep_closest(closest: &mut Option<(Hit, Color)>, candidate: Option<Hit>, color: Color) {
+fn keep_closest(closest: &mut Option<(Hit, Material)>, candidate: Option<Hit>, material: Material) {
     let Some(hit) = candidate else {
         return;
     };
@@ -173,7 +174,7 @@ fn keep_closest(closest: &mut Option<(Hit, Color)>, candidate: Option<Hit>, colo
         .as_ref()
         .is_none_or(|(current, _)| hit.distance < current.distance)
     {
-        *closest = Some((hit, color));
+        *closest = Some((hit, material));
     }
 }
 

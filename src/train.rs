@@ -1,4 +1,7 @@
-use crate::{color::Color, cube::Cube, math::Vec3, world::TrainDirection};
+use crate::{
+    color::Color, cube::Cube, cylinder::Cylinder, material::Material, math::Vec3,
+    world::TrainDirection,
+};
 
 pub const TRAIN_LENGTH: f32 = 4.2;
 
@@ -20,6 +23,7 @@ pub fn train_x_bounds(
 
 pub fn add_train(
     cubes: &mut Vec<Cube>,
+    cylinders: &mut Vec<Cylinder>,
     center_x: f32,
     lane_y: f32,
     lane_z: f32,
@@ -27,12 +31,12 @@ pub fn add_train(
     world_half_width: f32,
 ) {
     let facing = direction.sign();
-    let mut add_part = |local_x: f32, y: f32, z: f32, size: Vec3, color: Color| {
+    let mut add_part = |local_x: f32, y: f32, z: f32, size: Vec3, material: Material| {
         add_clipped_cube(
             cubes,
             Vec3::new(center_x + local_x * facing, lane_y + y, lane_z + z),
             size,
-            color,
+            material,
             world_half_width,
         );
     };
@@ -42,46 +46,68 @@ pub fn add_train(
     let gold = Color::new(220, 164, 60);
     let charcoal = Color::new(47, 50, 48);
     let window = Color::new(142, 205, 211);
+    let red_paint = Material::reflective_glossy(red, 0.18, 32.0, 0.05);
+    let dark_red_paint = Material::reflective_glossy(dark_red, 0.16, 32.0, 0.04);
+    let gold_metal = Material::reflective_glossy(gold, 0.30, 30.0, 0.12);
+    let dark_metal = Material::reflective_glossy(charcoal, 0.22, 26.0, 0.08);
+    let window_glass = Material::reflective_glossy(window, 0.42, 40.0, 0.18);
 
     add_part(
         0.0,
         0.42,
         0.0,
         Vec3::new(TRAIN_LENGTH, 0.22, 0.88),
-        charcoal,
+        dark_metal,
     );
-    add_part(0.82, 0.72, 0.0, Vec3::new(1.90, 0.64, 0.72), red);
-    add_part(-0.22, 0.92, 0.0, Vec3::new(0.94, 1.02, 0.78), dark_red);
-    add_part(-0.22, 1.48, 0.0, Vec3::new(1.18, 0.14, 0.94), gold);
-    add_part(-0.22, 1.02, 0.405, Vec3::new(0.48, 0.40, 0.05), window);
-    add_part(-0.22, 1.02, -0.405, Vec3::new(0.48, 0.40, 0.05), window);
-    add_part(1.32, 1.25, 0.0, Vec3::new(0.26, 0.72, 0.30), charcoal);
-    add_part(1.32, 1.64, 0.0, Vec3::new(0.48, 0.12, 0.46), charcoal);
-    add_part(1.98, 0.54, 0.0, Vec3::new(0.24, 0.20, 1.00), gold);
+    add_part(0.82, 0.72, 0.0, Vec3::new(1.90, 0.64, 0.72), red_paint);
+    add_part(
+        -0.22,
+        0.92,
+        0.0,
+        Vec3::new(0.94, 1.02, 0.78),
+        dark_red_paint,
+    );
+    add_part(-0.22, 1.48, 0.0, Vec3::new(1.18, 0.14, 0.94), gold_metal);
+    add_part(
+        -0.22,
+        1.02,
+        0.405,
+        Vec3::new(0.48, 0.40, 0.05),
+        window_glass,
+    );
+    add_part(
+        -0.22,
+        1.02,
+        -0.405,
+        Vec3::new(0.48, 0.40, 0.05),
+        window_glass,
+    );
+    add_part(1.32, 1.25, 0.0, Vec3::new(0.26, 0.72, 0.30), dark_metal);
+    add_part(1.32, 1.64, 0.0, Vec3::new(0.48, 0.12, 0.46), dark_metal);
+    add_part(1.98, 0.54, 0.0, Vec3::new(0.24, 0.20, 1.00), gold_metal);
 
-    add_part(-1.43, 0.88, 0.0, Vec3::new(1.18, 0.78, 0.78), red);
-    add_part(-1.43, 1.31, 0.0, Vec3::new(1.34, 0.12, 0.92), gold);
+    add_part(-1.43, 0.88, 0.0, Vec3::new(1.18, 0.78, 0.78), red_paint);
+    add_part(-1.43, 1.31, 0.0, Vec3::new(1.34, 0.12, 0.92), gold_metal);
 
     for wheel_x in [-1.72, -1.13, -0.42, 0.42, 1.14] {
         for wheel_z in [-0.43, 0.43] {
-            add_part(
-                wheel_x,
-                0.30,
-                wheel_z,
-                Vec3::new(0.34, 0.42, 0.12),
+            add_wheel(
+                cylinders,
+                Vec3::new(center_x + wheel_x * facing, lane_y + 0.30, lane_z + wheel_z),
                 charcoal,
+                world_half_width,
             );
         }
     }
 
-    add_part(1.86, 0.84, 0.0, Vec3::new(0.12, 0.16, 0.20), gold);
+    add_part(1.86, 0.84, 0.0, Vec3::new(0.12, 0.16, 0.20), gold_metal);
 }
 
 fn add_clipped_cube(
     cubes: &mut Vec<Cube>,
     center: Vec3,
     size: Vec3,
-    color: Color,
+    material: Material,
     world_half_width: f32,
 ) {
     let minimum_x = (center.x - size.x * 0.5).max(-world_half_width);
@@ -90,9 +116,25 @@ fn add_clipped_cube(
         return;
     }
 
-    cubes.push(Cube::new(
+    cubes.push(Cube::with_material(
         Vec3::new((minimum_x + maximum_x) * 0.5, center.y, center.z),
         Vec3::new(maximum_x - minimum_x, size.y, size.z),
+        material,
+    ));
+}
+
+fn add_wheel(cylinders: &mut Vec<Cylinder>, center: Vec3, color: Color, world_half_width: f32) {
+    const DIAMETER: f32 = 0.42;
+    const THICKNESS: f32 = 0.12;
+    let radius = DIAMETER * 0.5;
+    if center.x - radius < -world_half_width || center.x + radius > world_half_width {
+        return;
+    }
+
+    cylinders.push(Cylinder::new_between(
+        center - Vec3::new(0.0, 0.0, THICKNESS * 0.5),
+        center + Vec3::new(0.0, 0.0, THICKNESS * 0.5),
+        DIAMETER,
         color,
     ));
 }
@@ -107,8 +149,10 @@ mod tests {
     fn train_geometry_is_always_clipped_to_the_playable_world() {
         for center_x in [-6.825, -4.0, 0.0, 4.0, 6.825] {
             let mut cubes = Vec::new();
+            let mut cylinders = Vec::new();
             add_train(
                 &mut cubes,
+                &mut cylinders,
                 center_x,
                 0.0,
                 0.0,
@@ -118,14 +162,46 @@ mod tests {
             assert!(cubes.iter().all(|cube| {
                 cube.min.x >= -WORLD_EDGE - f32::EPSILON && cube.max.x <= WORLD_EDGE + f32::EPSILON
             }));
+            assert!(cylinders.iter().all(|wheel| {
+                wheel.center.x - wheel.radius >= -WORLD_EDGE - f32::EPSILON
+                    && wheel.center.x + wheel.radius <= WORLD_EDGE + f32::EPSILON
+            }));
         }
+    }
+
+    #[test]
+    fn train_body_reflects_but_disc_wheels_stay_matte() {
+        let mut cubes = Vec::new();
+        let mut wheels = Vec::new();
+        add_train(
+            &mut cubes,
+            &mut wheels,
+            0.0,
+            0.0,
+            0.0,
+            TrainDirection::LeftToRight,
+            WORLD_EDGE,
+        );
+
+        assert!(!cubes.is_empty());
+        assert!(cubes.iter().all(|part| part.material.reflectivity > 0.0));
+        assert!(cubes
+            .iter()
+            .filter(|part| matches!(part.material.albedo.to_hex(), 0xAE352D | 0x702A27))
+            .all(|part| part.material.reflectivity <= 0.05));
+        assert_eq!(wheels.len(), 10);
+        assert!(wheels
+            .iter()
+            .all(|wheel| { wheel.axis.z.abs() > 0.999 && wheel.material.reflectivity == 0.0 }));
     }
 
     #[test]
     fn train_is_hidden_until_it_reaches_an_edge() {
         let mut cubes = Vec::new();
+        let mut cylinders = Vec::new();
         add_train(
             &mut cubes,
+            &mut cylinders,
             -WORLD_EDGE - TRAIN_LENGTH * 0.5,
             0.0,
             0.0,
@@ -133,5 +209,6 @@ mod tests {
             WORLD_EDGE,
         );
         assert!(cubes.is_empty());
+        assert!(cylinders.is_empty());
     }
 }

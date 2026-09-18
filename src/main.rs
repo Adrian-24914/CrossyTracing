@@ -3,6 +3,7 @@ mod cube;
 mod cylinder;
 mod framebuffer;
 mod game;
+mod material;
 mod math;
 mod obstacle;
 mod orbit_camera;
@@ -11,6 +12,7 @@ mod random;
 mod ray;
 mod renderer;
 mod scene;
+mod skybox;
 mod sphere;
 mod train;
 mod tree;
@@ -21,6 +23,7 @@ use framebuffer::Framebuffer;
 use game::{Game, Move};
 use math::Vec3;
 use orbit_camera::OrbitCamera;
+use skybox::Skybox;
 use std::{
     f32::consts::FRAC_PI_4,
     thread,
@@ -40,6 +43,7 @@ fn main() {
         FRAC_PI_4,
     );
     let mut game = Game::new();
+    let skybox = Skybox::load().expect("No se pudo cargar assets/skybox/runtime");
     let mut scene = scene::build_scene(&game);
     let mut previous_frame = Instant::now();
 
@@ -50,6 +54,7 @@ fn main() {
         &scene.spheres,
         &scene.cylinders,
         &scene.forest_props,
+        &skybox,
     );
     update_title(&window, &game);
 
@@ -112,6 +117,7 @@ fn main() {
                 &scene.spheres,
                 &scene.cylinders,
                 &scene.forest_props,
+                &skybox,
             );
             update_title(&window, &game);
         }

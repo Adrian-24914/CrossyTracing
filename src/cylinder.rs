@@ -1,5 +1,6 @@
 use crate::{
     color::Color,
+    material::Material,
     math::Vec3,
     ray::{Hit, Ray},
 };
@@ -9,21 +10,44 @@ pub struct Cylinder {
     pub axis: Vec3,
     pub half_length: f32,
     pub radius: f32,
-    pub color: Color,
+    pub material: Material,
 }
 
 impl Cylinder {
     pub fn new_x(center: Vec3, length: f32, diameter: f32, color: Color) -> Self {
+        Self::new_between(
+            center - Vec3::new(length * 0.5, 0.0, 0.0),
+            center + Vec3::new(length * 0.5, 0.0, 0.0),
+            diameter,
+            color,
+        )
+    }
+
+    pub fn new_x_with_material(
+        center: Vec3,
+        length: f32,
+        diameter: f32,
+        material: Material,
+    ) -> Self {
         Self {
             center,
             axis: Vec3::new(1.0, 0.0, 0.0),
             half_length: length * 0.5,
             radius: diameter * 0.5,
-            color,
+            material,
         }
     }
 
     pub fn new_between(start: Vec3, end: Vec3, diameter: f32, color: Color) -> Self {
+        Self::new_between_with_material(start, end, diameter, Material::matte(color))
+    }
+
+    pub fn new_between_with_material(
+        start: Vec3,
+        end: Vec3,
+        diameter: f32,
+        material: Material,
+    ) -> Self {
         let span = end - start;
         let length = span.dot(span).sqrt();
         let axis = if length > 0.000_001 {
@@ -37,7 +61,7 @@ impl Cylinder {
             axis,
             half_length: length * 0.5,
             radius: diameter * 0.5,
-            color,
+            material,
         }
     }
 

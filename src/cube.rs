@@ -1,5 +1,6 @@
 use crate::{
     color::Color,
+    material::Material,
     math::Vec3,
     ray::{Hit, Ray},
 };
@@ -7,16 +8,20 @@ use crate::{
 pub struct Cube {
     pub min: Vec3,
     pub max: Vec3,
-    pub color: Color,
+    pub material: Material,
 }
 
 impl Cube {
     pub fn new(center: Vec3, size: Vec3, color: Color) -> Self {
+        Self::with_material(center, size, Material::matte(color))
+    }
+
+    pub fn with_material(center: Vec3, size: Vec3, material: Material) -> Self {
         let half_size = size * 0.5;
         Self {
             min: center - half_size,
             max: center + half_size,
-            color,
+            material,
         }
     }
 
