@@ -5,6 +5,7 @@ mod framebuffer;
 mod game;
 mod math;
 mod orbit_camera;
+mod player;
 mod random;
 mod ray;
 mod renderer;
