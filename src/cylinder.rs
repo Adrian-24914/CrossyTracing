@@ -43,6 +43,15 @@ impl Cylinder {
 
     pub fn intersect(&self, ray: &Ray) -> Option<Hit> {
         let offset = ray.origin - self.center;
+        let bounds_squared = self.half_length * self.half_length + self.radius * self.radius;
+        let distance_squared = offset.dot(offset);
+        let along_ray = offset.dot(ray.direction);
+        if (distance_squared > bounds_squared && along_ray > 0.0)
+            || along_ray * along_ray - (distance_squared - bounds_squared) < 0.0
+        {
+            return None;
+        }
+
         let mut closest = self.intersect_side(ray, offset);
         let ray_axis = ray.direction.dot(self.axis);
         let offset_axis = offset.dot(self.axis);

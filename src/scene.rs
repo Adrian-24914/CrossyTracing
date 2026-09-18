@@ -7,6 +7,7 @@ use crate::{
     player::add_player,
     sphere::Sphere,
     train::{add_train, train_center_x},
+    tree::Tree,
     world::{Environment, ForestSectionKind, LaneKind, RailwayPhase, RailwayState, SectionKind},
 };
 
@@ -14,12 +15,14 @@ pub struct Scene {
     pub cubes: Vec<Cube>,
     pub spheres: Vec<Sphere>,
     pub cylinders: Vec<Cylinder>,
+    pub trees: Vec<Tree>,
 }
 
 pub fn build_scene(game: &Game) -> Scene {
     let mut cubes = Vec::with_capacity(LANE_COUNT * (TILE_COLUMNS + 3));
     let mut spheres = Vec::new();
     let mut cylinders = Vec::new();
+    let mut trees = Vec::new();
 
     for (lane_index, lane) in game.lanes.iter().enumerate() {
         let (lane_y, lane_z) = game.lane_position(lane_index);
@@ -69,11 +72,14 @@ pub fn build_scene(game: &Game) -> Scene {
         match lane.environment {
             Environment::Forest => {
                 for &column in &lane.obstacle_columns {
-                    cubes.push(Cube::new(
-                        Vec3::new(column_x(column), lane_y + 0.55, lane_z),
-                        Vec3::new(0.72, 0.82, 0.72),
+                    let tree = Tree::new(
+                        Vec3::new(column_x(column), lane_y + 0.14, lane_z),
                         obstacle_color,
-                    ));
+                    );
+                    debug_assert!(tree.foliage_anchors().iter().all(|anchor| {
+                        anchor.position.y > lane_y && anchor.suggested_size > 0.0
+                    }));
+                    trees.push(tree);
                 }
             }
             Environment::River => {
@@ -130,6 +136,7 @@ pub fn build_scene(game: &Game) -> Scene {
         cubes,
         spheres,
         cylinders,
+        trees,
     };
     add_player(&mut scene, game);
     scene

@@ -12,6 +12,7 @@ mod renderer;
 mod scene;
 mod sphere;
 mod train;
+mod tree;
 mod window;
 mod world;
 
@@ -47,6 +48,7 @@ fn main() {
         &scene.cubes,
         &scene.spheres,
         &scene.cylinders,
+        &scene.trees,
     );
     update_title(&window, &game);
 
@@ -108,6 +110,7 @@ fn main() {
                 &scene.cubes,
                 &scene.spheres,
                 &scene.cylinders,
+                &scene.trees,
             );
             update_title(&window, &game);
         }

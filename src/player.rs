@@ -327,6 +327,7 @@ mod tests {
             cubes: Vec::new(),
             spheres: Vec::new(),
             cylinders: Vec::new(),
+            trees: Vec::new(),
         }
     }
 

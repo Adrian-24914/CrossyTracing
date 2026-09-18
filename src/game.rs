@@ -398,18 +398,20 @@ impl Game {
         let mut obstacle_counts = Vec::with_capacity(lane_count);
         for _ in 0..lane_count {
             obstacle_counts.push(match kind {
-                ForestSectionKind::Clearing => 3 + self.random.range(2),
-                ForestSectionKind::Grove => 3 + self.random.range(2),
-                ForestSectionKind::Thicket => 4,
+                ForestSectionKind::Clearing => 1,
+                ForestSectionKind::Grove => 1 + self.random.range(2),
+                ForestSectionKind::Thicket => 2,
             });
         }
         match kind {
             ForestSectionKind::Clearing => {
                 let open_lane = self.random.range(lane_count);
-                obstacle_counts[open_lane] = if self.random.range(100) < 35 { 0 } else { 3 };
+                if self.random.range(100) < 35 {
+                    obstacle_counts[open_lane] = 0;
+                }
             }
             ForestSectionKind::Grove => {}
-            ForestSectionKind::Thicket => obstacle_counts[self.random.range(lane_count)] = 4,
+            ForestSectionKind::Thicket => {}
         }
         self.random.shuffle(&mut obstacle_counts);
 
@@ -455,6 +457,7 @@ impl Game {
         obstacle_count: usize,
         forced_open: Option<usize>,
     ) -> Lane {
+        let obstacle_count = obstacle_count.min(2);
         let mut obstacle_columns = Vec::with_capacity(obstacle_count);
         while obstacle_columns.len() < obstacle_count {
             let column = self.random.range(TILE_COLUMNS);
@@ -571,7 +574,7 @@ impl Game {
     fn emergency_forest_window(&mut self) -> Vec<Lane> {
         let mut lanes = Vec::with_capacity(LANE_COUNT);
         for lane_index in 0..LANE_COUNT {
-            let obstacle_count = 3 + lane_index % 2;
+            let obstacle_count = 1 + lane_index % 2;
             lanes.push(self.generate_forest_lane(
                 self.next_section_id,
                 ForestSectionKind::Grove,
@@ -758,10 +761,7 @@ mod tests {
         for lane in &game.lanes {
             match lane.environment {
                 Environment::Forest => {
-                    assert!(
-                        lane.obstacle_columns.is_empty()
-                            || (3..=4).contains(&lane.obstacle_columns.len())
-                    )
+                    assert!(lane.obstacle_columns.len() <= 2)
                 }
                 Environment::River => {
                     assert!((3..=4).contains(&lane.platform_columns.len()))
@@ -784,23 +784,19 @@ mod tests {
     }
 
     #[test]
-    fn forest_sections_never_exceed_four_obstacles() {
+    fn forest_rows_keep_between_zero_and_two_trees() {
         let mut game = Game::with_seed(12);
         let clearing = game.generate_section_candidate(100, ForestSectionKind::Clearing);
         let thicket = game.generate_section_candidate(101, ForestSectionKind::Thicket);
-        assert!(clearing
-            .lanes
-            .iter()
-            .any(|lane| lane.obstacle_columns.len() == 3));
         assert!(thicket
             .lanes
             .iter()
-            .all(|lane| lane.obstacle_columns.len() == 4));
+            .all(|lane| lane.obstacle_columns.len() == 2));
         assert!(clearing
             .lanes
             .iter()
             .chain(&thicket.lanes)
-            .all(|lane| lane.obstacle_columns.len() <= 4));
+            .all(|lane| lane.obstacle_columns.len() <= 2));
     }
 
     #[test]
@@ -838,6 +834,31 @@ mod tests {
             assert_eq!(first_lane.section_kind, second_lane.section_kind);
             assert_eq!(first_lane.obstacle_columns, second_lane.obstacle_columns);
             assert_eq!(first_lane.platform_columns, second_lane.platform_columns);
+        }
+    }
+
+    #[test]
+    fn recycling_keeps_each_existing_rows_obstacles() {
+        let mut game = Game::with_seed(123);
+        let existing_rows: Vec<_> = game.lanes[..LANE_COUNT - 1]
+            .iter()
+            .map(|lane| {
+                (
+                    lane.section_id,
+                    lane.environment,
+                    lane.obstacle_columns.clone(),
+                    lane.platform_columns.clone(),
+                )
+            })
+            .collect();
+
+        game.recycle_front_lane();
+
+        for (previous, lane) in existing_rows.iter().zip(&game.lanes[1..]) {
+            assert_eq!(previous.0, lane.section_id);
+            assert_eq!(previous.1, lane.environment);
+            assert_eq!(previous.2, lane.obstacle_columns);
+            assert_eq!(previous.3, lane.platform_columns);
         }
     }
 

@@ -7,6 +7,7 @@ use crate::{
     orbit_camera::OrbitCamera,
     ray::{Hit, Ray},
     sphere::Sphere,
+    tree::Tree,
 };
 use std::thread;
 
@@ -18,6 +19,7 @@ pub fn render(
     cubes: &[Cube],
     spheres: &[Sphere],
     cylinders: &[Cylinder],
+    trees: &[Tree],
 ) {
     let light_direction = Vec3::new(-0.45, 0.85, 0.35).normalize();
     let width = framebuffer.width;
@@ -41,7 +43,7 @@ pub fn render(
                     for (x, pixel) in row.iter_mut().enumerate() {
                         let direction = camera.ray_direction(x, y, width, height);
                         let ray = Ray::new(camera.eye, direction);
-                        let color = match closest_hit(&ray, cubes, spheres, cylinders) {
+                        let color = match closest_hit(&ray, cubes, spheres, cylinders, trees) {
                             Some((hit, color)) => shade(hit, color, light_direction),
                             None => sky_color(direction),
                         };
@@ -58,6 +60,7 @@ fn closest_hit(
     cubes: &[Cube],
     spheres: &[Sphere],
     cylinders: &[Cylinder],
+    trees: &[Tree],
 ) -> Option<(Hit, Color)> {
     let mut closest: Option<(Hit, Color)> = None;
     for cube in cubes {
@@ -91,6 +94,17 @@ fn closest_hit(
             .is_none_or(|(current, _)| hit.distance < current.distance)
         {
             closest = Some((hit, cylinder.color));
+        }
+    }
+    for tree in trees {
+        let Some((hit, color)) = tree.intersect(ray) else {
+            continue;
+        };
+        if closest
+            .as_ref()
+            .is_none_or(|(current, _)| hit.distance < current.distance)
+        {
+            closest = Some((hit, color));
         }
     }
     closest
@@ -129,7 +143,7 @@ mod tests {
             Color::new(220, 80, 60),
         )];
 
-        render(&mut framebuffer, &camera, &cubes, &[], &[]);
+        render(&mut framebuffer, &camera, &cubes, &[], &[], &[]);
 
         let visible_pixels = framebuffer
             .color
