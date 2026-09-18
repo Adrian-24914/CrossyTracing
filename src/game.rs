@@ -2,8 +2,8 @@ use crate::{
     random::Random,
     train::train_x_bounds,
     world::{
-        Environment, ForestSectionKind, Lane, LaneKind, RailwayPhase, RailwayState, Section,
-        SectionKind, SectionSignature, TrainDirection,
+        Environment, ForestObstacle, ForestObstacleKind, ForestSectionKind, Lane, LaneKind,
+        RailwayPhase, RailwayState, Section, SectionKind, SectionSignature, TrainDirection,
     },
 };
 use std::{
@@ -372,7 +372,7 @@ impl Game {
             section_kind: SectionKind::Railway,
             section_id,
             kind: LaneKind::Rail,
-            obstacle_columns: Vec::new(),
+            obstacles: Vec::new(),
             platform_columns: Vec::new(),
             railway: Some(RailwayState {
                 phase: RailwayPhase::Warning,
@@ -398,9 +398,9 @@ impl Game {
         let mut obstacle_counts = Vec::with_capacity(lane_count);
         for _ in 0..lane_count {
             obstacle_counts.push(match kind {
-                ForestSectionKind::Clearing => 1,
-                ForestSectionKind::Grove => 1 + self.random.range(2),
-                ForestSectionKind::Thicket => 2,
+                ForestSectionKind::Clearing => 2 + self.random.range(2),
+                ForestSectionKind::Grove => 3 + self.random.range(3),
+                ForestSectionKind::Thicket => 5 + self.random.range(2),
             });
         }
         match kind {
@@ -457,7 +457,7 @@ impl Game {
         obstacle_count: usize,
         forced_open: Option<usize>,
     ) -> Lane {
-        let obstacle_count = obstacle_count.min(2);
+        let obstacle_count = obstacle_count.min(TILE_COLUMNS - 1);
         let mut obstacle_columns = Vec::with_capacity(obstacle_count);
         while obstacle_columns.len() < obstacle_count {
             let column = self.random.range(TILE_COLUMNS);
@@ -466,6 +466,22 @@ impl Game {
             }
         }
         obstacle_columns.sort_unstable();
+        let maximum_trees = obstacle_count.saturating_sub(1).min(4);
+        let tree_count = self.random.range(maximum_trees + 1);
+        let mut obstacle_kinds = vec![ForestObstacleKind::Tree; tree_count];
+        while obstacle_kinds.len() < obstacle_count {
+            obstacle_kinds.push(match self.random.range(3) {
+                0 => ForestObstacleKind::Rock,
+                1 => ForestObstacleKind::FallenLog,
+                _ => ForestObstacleKind::Bush,
+            });
+        }
+        self.random.shuffle(&mut obstacle_kinds);
+        let obstacles = obstacle_columns
+            .into_iter()
+            .zip(obstacle_kinds)
+            .map(|(column, kind)| ForestObstacle { column, kind })
+            .collect();
 
         Lane {
             environment: Environment::Forest,
@@ -476,7 +492,7 @@ impl Game {
             } else {
                 LaneKind::Grass
             },
-            obstacle_columns,
+            obstacles,
             platform_columns: Vec::new(),
             railway: None,
         }
@@ -498,7 +514,7 @@ impl Game {
             section_kind: SectionKind::River,
             section_id,
             kind: LaneKind::Water,
-            obstacle_columns: Vec::new(),
+            obstacles: Vec::new(),
             platform_columns,
             railway: None,
         }
@@ -574,7 +590,7 @@ impl Game {
     fn emergency_forest_window(&mut self) -> Vec<Lane> {
         let mut lanes = Vec::with_capacity(LANE_COUNT);
         for lane_index in 0..LANE_COUNT {
-            let obstacle_count = 1 + lane_index % 2;
+            let obstacle_count = 3 + lane_index % 2;
             lanes.push(self.generate_forest_lane(
                 self.next_section_id,
                 ForestSectionKind::Grove,
@@ -761,12 +777,12 @@ mod tests {
         for lane in &game.lanes {
             match lane.environment {
                 Environment::Forest => {
-                    assert!(lane.obstacle_columns.len() <= 2)
+                    assert!(lane.obstacles.len() <= 6)
                 }
                 Environment::River => {
                     assert!((3..=4).contains(&lane.platform_columns.len()))
                 }
-                Environment::Railway => assert!(lane.obstacle_columns.is_empty()),
+                Environment::Railway => assert!(lane.obstacles.is_empty()),
             }
         }
 
@@ -784,19 +800,51 @@ mod tests {
     }
 
     #[test]
-    fn forest_rows_keep_between_zero_and_two_trees() {
+    fn forest_rows_keep_between_zero_and_six_obstacles() {
         let mut game = Game::with_seed(12);
         let clearing = game.generate_section_candidate(100, ForestSectionKind::Clearing);
         let thicket = game.generate_section_candidate(101, ForestSectionKind::Thicket);
         assert!(thicket
             .lanes
             .iter()
-            .all(|lane| lane.obstacle_columns.len() == 2));
+            .all(|lane| (5..=6).contains(&lane.obstacles.len())));
         assert!(clearing
             .lanes
             .iter()
             .chain(&thicket.lanes)
-            .all(|lane| lane.obstacle_columns.len() <= 2));
+            .all(|lane| lane.obstacles.len() <= 6));
+    }
+
+    #[test]
+    fn forest_rows_allow_four_trees_and_generate_every_prop_kind() {
+        let mut game = Game::with_seed(72);
+        let mut found = [false; 4];
+        let mut found_four_trees = false;
+
+        for section_id in 0..200 {
+            let section = game.generate_section_candidate(section_id, ForestSectionKind::Thicket);
+            for lane in section.lanes {
+                let tree_count = lane
+                    .obstacles
+                    .iter()
+                    .filter(|obstacle| obstacle.kind == ForestObstacleKind::Tree)
+                    .count();
+                assert!(tree_count <= 4);
+                assert!(lane.obstacles.len() - tree_count >= 1);
+                found_four_trees |= tree_count == 4;
+                for obstacle in lane.obstacles {
+                    found[match obstacle.kind {
+                        ForestObstacleKind::Tree => 0,
+                        ForestObstacleKind::Rock => 1,
+                        ForestObstacleKind::FallenLog => 2,
+                        ForestObstacleKind::Bush => 3,
+                    }] = true;
+                }
+            }
+        }
+
+        assert!(found.into_iter().all(|was_generated| was_generated));
+        assert!(found_four_trees);
     }
 
     #[test]
@@ -808,7 +856,7 @@ mod tests {
             let open_lanes = section
                 .lanes
                 .iter()
-                .filter(|lane| lane.obstacle_columns.is_empty())
+                .filter(|lane| lane.obstacles.is_empty())
                 .count();
             assert!(open_lanes <= 1);
             sections_with_open_lane += usize::from(open_lanes == 1);
@@ -832,7 +880,7 @@ mod tests {
         let second = Game::with_seed(123);
         for (first_lane, second_lane) in first.lanes.iter().zip(&second.lanes) {
             assert_eq!(first_lane.section_kind, second_lane.section_kind);
-            assert_eq!(first_lane.obstacle_columns, second_lane.obstacle_columns);
+            assert_eq!(first_lane.obstacles, second_lane.obstacles);
             assert_eq!(first_lane.platform_columns, second_lane.platform_columns);
         }
     }
@@ -846,7 +894,7 @@ mod tests {
                 (
                     lane.section_id,
                     lane.environment,
-                    lane.obstacle_columns.clone(),
+                    lane.obstacles.clone(),
                     lane.platform_columns.clone(),
                 )
             })
@@ -857,7 +905,7 @@ mod tests {
         for (previous, lane) in existing_rows.iter().zip(&game.lanes[1..]) {
             assert_eq!(previous.0, lane.section_id);
             assert_eq!(previous.1, lane.environment);
-            assert_eq!(previous.2, lane.obstacle_columns);
+            assert_eq!(previous.2, lane.obstacles);
             assert_eq!(previous.3, lane.platform_columns);
         }
     }
@@ -887,7 +935,10 @@ mod tests {
         game.player_column = 3;
         let lane = game.generate_forest_lane(701, ForestSectionKind::Clearing, 1, Some(3));
         game.lanes[game.player_lane] = lane;
-        game.lanes[game.player_lane].obstacle_columns = vec![2];
+        game.lanes[game.player_lane].obstacles = vec![ForestObstacle {
+            column: 2,
+            kind: ForestObstacleKind::Rock,
+        }];
         assert!(!game.try_move(Move::Left));
         assert_eq!(game.player_column, 3);
     }
@@ -908,8 +959,8 @@ mod tests {
         let player_column = game.player_column;
         match game.lanes[target_lane].environment {
             Environment::Forest => game.lanes[target_lane]
-                .obstacle_columns
-                .retain(|column| *column != player_column),
+                .obstacles
+                .retain(|obstacle| obstacle.column != player_column),
             Environment::River => {
                 if !game.lanes[target_lane]
                     .platform_columns

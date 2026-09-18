@@ -4,10 +4,10 @@ use crate::{
     cylinder::Cylinder,
     game::{Game, LANE_COUNT, TILE_COLUMNS, TILE_SPACING, WORLD_HALF_WIDTH},
     math::Vec3,
+    obstacle::ForestProp,
     player::add_player,
     sphere::Sphere,
     train::{add_train, train_center_x},
-    tree::Tree,
     world::{Environment, ForestSectionKind, LaneKind, RailwayPhase, RailwayState, SectionKind},
 };
 
@@ -15,14 +15,14 @@ pub struct Scene {
     pub cubes: Vec<Cube>,
     pub spheres: Vec<Sphere>,
     pub cylinders: Vec<Cylinder>,
-    pub trees: Vec<Tree>,
+    pub forest_props: Vec<ForestProp>,
 }
 
 pub fn build_scene(game: &Game) -> Scene {
     let mut cubes = Vec::with_capacity(LANE_COUNT * (TILE_COLUMNS + 3));
     let mut spheres = Vec::new();
     let mut cylinders = Vec::new();
-    let mut trees = Vec::new();
+    let mut forest_props = Vec::new();
 
     for (lane_index, lane) in game.lanes.iter().enumerate() {
         let (lane_y, lane_z) = game.lane_position(lane_index);
@@ -71,15 +71,18 @@ pub fn build_scene(game: &Game) -> Scene {
 
         match lane.environment {
             Environment::Forest => {
-                for &column in &lane.obstacle_columns {
-                    let tree = Tree::new(
-                        Vec3::new(column_x(column), lane_y + 0.14, lane_z),
+                for obstacle in &lane.obstacles {
+                    let prop = ForestProp::new(
+                        obstacle.kind,
+                        Vec3::new(column_x(obstacle.column), lane_y + 0.14, lane_z),
                         obstacle_color,
                     );
-                    debug_assert!(tree.foliage_anchors().iter().all(|anchor| {
-                        anchor.position.y > lane_y && anchor.suggested_size > 0.0
+                    debug_assert!(prop.foliage_anchors().is_none_or(|anchors| {
+                        anchors
+                            .iter()
+                            .all(|anchor| anchor.position.y > lane_y && anchor.suggested_size > 0.0)
                     }));
-                    trees.push(tree);
+                    forest_props.push(prop);
                 }
             }
             Environment::River => {
@@ -136,7 +139,7 @@ pub fn build_scene(game: &Game) -> Scene {
         cubes,
         spheres,
         cylinders,
-        trees,
+        forest_props,
     };
     add_player(&mut scene, game);
     scene
@@ -211,9 +214,11 @@ mod tests {
     fn scene_contains_every_tile_and_the_player() {
         let game = Game::new();
         let scene = build_scene(&game);
+        let expected_forest_props: usize = game.lanes.iter().map(|lane| lane.obstacles.len()).sum();
         assert!(scene.cubes.len() >= LANE_COUNT * TILE_COLUMNS);
         assert!(scene.spheres.len() >= 7);
         assert!(!scene.cylinders.is_empty());
+        assert_eq!(scene.forest_props.len(), expected_forest_props);
     }
 
     #[test]

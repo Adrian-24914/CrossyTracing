@@ -4,10 +4,10 @@ use crate::{
     cylinder::Cylinder,
     framebuffer::Framebuffer,
     math::Vec3,
+    obstacle::ForestProp,
     orbit_camera::OrbitCamera,
     ray::{Hit, Ray},
     sphere::Sphere,
-    tree::Tree,
 };
 use std::thread;
 
@@ -19,7 +19,7 @@ pub fn render(
     cubes: &[Cube],
     spheres: &[Sphere],
     cylinders: &[Cylinder],
-    trees: &[Tree],
+    forest_props: &[ForestProp],
 ) {
     let light_direction = Vec3::new(-0.45, 0.85, 0.35).normalize();
     let width = framebuffer.width;
@@ -43,7 +43,8 @@ pub fn render(
                     for (x, pixel) in row.iter_mut().enumerate() {
                         let direction = camera.ray_direction(x, y, width, height);
                         let ray = Ray::new(camera.eye, direction);
-                        let color = match closest_hit(&ray, cubes, spheres, cylinders, trees) {
+                        let color = match closest_hit(&ray, cubes, spheres, cylinders, forest_props)
+                        {
                             Some((hit, color)) => shade(hit, color, light_direction),
                             None => sky_color(direction),
                         };
@@ -60,7 +61,7 @@ fn closest_hit(
     cubes: &[Cube],
     spheres: &[Sphere],
     cylinders: &[Cylinder],
-    trees: &[Tree],
+    forest_props: &[ForestProp],
 ) -> Option<(Hit, Color)> {
     let mut closest: Option<(Hit, Color)> = None;
     for cube in cubes {
@@ -96,8 +97,8 @@ fn closest_hit(
             closest = Some((hit, cylinder.color));
         }
     }
-    for tree in trees {
-        let Some((hit, color)) = tree.intersect(ray) else {
+    for prop in forest_props {
+        let Some((hit, color)) = prop.intersect(ray) else {
             continue;
         };
         if closest

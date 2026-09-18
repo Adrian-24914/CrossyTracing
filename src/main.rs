@@ -4,6 +4,7 @@ mod cylinder;
 mod framebuffer;
 mod game;
 mod math;
+mod obstacle;
 mod orbit_camera;
 mod player;
 mod random;
@@ -48,7 +49,7 @@ fn main() {
         &scene.cubes,
         &scene.spheres,
         &scene.cylinders,
-        &scene.trees,
+        &scene.forest_props,
     );
     update_title(&window, &game);
 
@@ -110,7 +111,7 @@ fn main() {
                 &scene.cubes,
                 &scene.spheres,
                 &scene.cylinders,
-                &scene.trees,
+                &scene.forest_props,
             );
             update_title(&window, &game);
         }
