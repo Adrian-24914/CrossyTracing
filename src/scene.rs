@@ -15,6 +15,13 @@ pub struct Scene {
     pub cylinders: Vec<Cylinder>,
 }
 
+const BIG_WALK_SCALE: f32 = 0.40;
+const BIG_WALK_CENTER_OFFSET: f32 = 0.16;
+const EYE_LATERAL_OFFSET: f32 = 0.415;
+const EYE_HALF_THICKNESS: f32 = 0.022;
+const PUPIL_OUTWARD_OFFSET: f32 = 0.035;
+const PUPIL_HALF_THICKNESS: f32 = 0.015;
+
 pub struct CharacterPalette {
     pub head: Color,
     pub beak: Color,
@@ -223,8 +230,9 @@ fn add_player(scene: &mut Scene, game: &Game) {
         Environment::River => -0.11,
         Environment::Railway => 0.30,
     };
-    let base = Vec3::new(x, lane_y + surface_height, lane_z);
     let facing = Vec3::new(0.0, 0.0, -1.0);
+    let tile_center = Vec3::new(x, lane_y + surface_height, lane_z);
+    let base = tile_center - facing * scaled(BIG_WALK_CENTER_OFFSET);
     let palette = CharacterPalette::big_walk();
 
     add_big_walk_character(scene, base, facing, &palette);
@@ -236,6 +244,14 @@ fn transform_local(base: Vec3, local: Vec3, facing: Vec3) -> Vec3 {
     let facing = facing.normalize();
     let right = facing.cross(&UP).normalize();
     base + right * local.x + UP * local.y + facing * local.z
+}
+
+fn transform_character_local(base: Vec3, local: Vec3, facing: Vec3) -> Vec3 {
+    transform_local(base, local * BIG_WALK_SCALE, facing)
+}
+
+fn scaled(value: f32) -> f32 {
+    value * BIG_WALK_SCALE
 }
 
 fn add_big_walk_character(scene: &mut Scene, base: Vec3, facing: Vec3, palette: &CharacterPalette) {
@@ -259,30 +275,32 @@ fn add_big_walk_character(scene: &mut Scene, base: Vec3, facing: Vec3, palette: 
 
 fn add_head(scene: &mut Scene, base: Vec3, facing: Vec3, palette: &CharacterPalette) {
     scene.spheres.push(Sphere::new(
-        transform_local(base, Vec3::new(0.0, 3.41, 0.0), facing),
-        0.87,
+        transform_character_local(base, Vec3::new(0.0, 3.41, 0.0), facing),
+        scaled(0.87),
         palette.head,
     ));
 }
 
 fn add_beak(scene: &mut Scene, base: Vec3, facing: Vec3, palette: &CharacterPalette) {
-    let start = transform_local(base, Vec3::new(0.0, 3.41, 0.34), facing);
-    let middle = transform_local(base, Vec3::new(0.0, 3.41, 0.58), facing);
-    let end = transform_local(base, Vec3::new(0.0, 3.41, 0.80), facing);
+    let start = transform_character_local(base, Vec3::new(0.0, 3.41, 0.34), facing);
+    let middle = transform_character_local(base, Vec3::new(0.0, 3.41, 0.56), facing);
+    let end = transform_character_local(base, Vec3::new(0.0, 3.41, 0.75), facing);
+    let diameter = scaled(0.23);
     scene
         .cylinders
-        .push(Cylinder::new_between(start, middle, 0.23, palette.beak));
+        .push(Cylinder::new_between(start, middle, diameter, palette.beak));
     scene
         .cylinders
-        .push(Cylinder::new_between(middle, end, 0.28, palette.beak));
+        .push(Cylinder::new_between(middle, end, diameter, palette.beak));
+    scene.spheres.push(Sphere::new(end, diameter, palette.beak));
 }
 
 fn eye_center(base: Vec3, facing: Vec3, side: f32) -> Vec3 {
     const UP: Vec3 = Vec3::new(0.0, 1.0, 0.0);
 
-    let head_center = transform_local(base, Vec3::new(0.0, 3.41, 0.0), facing);
+    let head_center = transform_character_local(base, Vec3::new(0.0, 3.41, 0.0), facing);
     let right = facing.normalize().cross(&UP).normalize();
-    head_center + right * (0.36 * side)
+    head_center + right * scaled(EYE_LATERAL_OFFSET * side)
 }
 
 fn add_eye(scene: &mut Scene, base: Vec3, facing: Vec3, side: f32, palette: &CharacterPalette) {
@@ -291,9 +309,9 @@ fn add_eye(scene: &mut Scene, base: Vec3, facing: Vec3, side: f32, palette: &Cha
     let right = facing.normalize().cross(&UP).normalize();
     let center = eye_center(base, facing, side);
     scene.cylinders.push(Cylinder::new_between(
-        center - right * 0.022,
-        center + right * 0.022,
-        0.43,
+        center - right * scaled(EYE_HALF_THICKNESS),
+        center + right * scaled(EYE_HALF_THICKNESS),
+        scaled(0.43),
         palette.eye_white,
     ));
 }
@@ -310,11 +328,11 @@ fn add_pupil(scene: &mut Scene, base: Vec3, facing: Vec3, side: f32, palette: &C
     const UP: Vec3 = Vec3::new(0.0, 1.0, 0.0);
 
     let right = facing.normalize().cross(&UP).normalize();
-    let center = eye_center(base, facing, side) + right * (0.045 * side);
+    let center = eye_center(base, facing, side) + right * scaled(PUPIL_OUTWARD_OFFSET * side);
     scene.cylinders.push(Cylinder::new_between(
-        center - right * 0.015,
-        center + right * 0.015,
-        0.26,
+        center - right * scaled(PUPIL_HALF_THICKNESS),
+        center + right * scaled(PUPIL_HALF_THICKNESS),
+        scaled(0.26),
         palette.pupil,
     ));
 }
@@ -329,16 +347,16 @@ fn add_left_pupil(scene: &mut Scene, base: Vec3, facing: Vec3, palette: &Charact
 
 fn add_torso(scene: &mut Scene, base: Vec3, facing: Vec3, palette: &CharacterPalette) {
     scene.spheres.push(Sphere::new(
-        transform_local(base, Vec3::new(0.0, 2.66, 0.0), facing),
-        0.62,
+        transform_character_local(base, Vec3::new(0.0, 2.66, 0.0), facing),
+        scaled(0.62),
         palette.torso,
     ));
 }
 
 fn add_hips(scene: &mut Scene, base: Vec3, facing: Vec3, palette: &CharacterPalette) {
     scene.spheres.push(Sphere::new(
-        transform_local(base, Vec3::new(0.0, 1.76, 0.0), facing),
-        1.20,
+        transform_character_local(base, Vec3::new(0.0, 1.76, 0.0), facing),
+        scaled(1.20),
         palette.hips,
     ));
 }
@@ -352,15 +370,28 @@ fn add_arm(
     wrist: Vec3,
     palette: &CharacterPalette,
 ) {
-    let shoulder = transform_local(base, shoulder, facing);
-    let elbow = transform_local(base, elbow, facing);
-    let wrist = transform_local(base, wrist, facing);
+    let shoulder = transform_character_local(base, shoulder, facing);
+    let elbow = transform_character_local(base, elbow, facing);
+    let wrist = transform_character_local(base, wrist, facing);
+    let joint_diameter = scaled(0.15);
+    scene.cylinders.push(Cylinder::new_between(
+        shoulder,
+        elbow,
+        joint_diameter,
+        palette.arms,
+    ));
+    scene.cylinders.push(Cylinder::new_between(
+        elbow,
+        wrist,
+        joint_diameter,
+        palette.arms,
+    ));
     scene
-        .cylinders
-        .push(Cylinder::new_between(shoulder, elbow, 0.15, palette.arms));
+        .spheres
+        .push(Sphere::new(shoulder, joint_diameter, palette.arms));
     scene
-        .cylinders
-        .push(Cylinder::new_between(elbow, wrist, 0.15, palette.arms));
+        .spheres
+        .push(Sphere::new(elbow, joint_diameter, palette.arms));
 }
 
 fn add_right_arm(scene: &mut Scene, base: Vec3, facing: Vec3, palette: &CharacterPalette) {
@@ -389,26 +420,40 @@ fn add_left_arm(scene: &mut Scene, base: Vec3, facing: Vec3, palette: &Character
 
 fn add_right_hand(scene: &mut Scene, base: Vec3, facing: Vec3, palette: &CharacterPalette) {
     scene.spheres.push(Sphere::new(
-        transform_local(base, Vec3::new(0.92, 1.78, 0.0), facing),
-        0.25,
+        transform_character_local(base, Vec3::new(0.92, 1.78, 0.0), facing),
+        scaled(0.25),
         palette.hands,
     ));
 }
 
 fn add_left_hand(scene: &mut Scene, base: Vec3, facing: Vec3, palette: &CharacterPalette) {
     scene.spheres.push(Sphere::new(
-        transform_local(base, Vec3::new(-0.92, 1.95, 0.0), facing),
-        0.25,
+        transform_character_local(base, Vec3::new(-0.92, 1.95, 0.0), facing),
+        scaled(0.25),
         palette.hands,
     ));
 }
 
 fn add_leg(scene: &mut Scene, base: Vec3, facing: Vec3, side: f32, palette: &CharacterPalette) {
-    let hip = transform_local(base, Vec3::new(0.22 * side, 1.25, 0.0), facing);
-    let ankle = transform_local(base, Vec3::new(0.22 * side, 0.22, 0.0), facing);
+    let hip = transform_character_local(base, Vec3::new(0.22 * side, 1.25, 0.0), facing);
+    let knee = transform_character_local(base, Vec3::new(0.22 * side, 0.735, 0.0), facing);
+    let ankle = transform_character_local(base, Vec3::new(0.22 * side, 0.22, 0.0), facing);
+    let joint_diameter = scaled(0.16);
+    scene.cylinders.push(Cylinder::new_between(
+        hip,
+        knee,
+        joint_diameter,
+        palette.legs,
+    ));
+    scene.cylinders.push(Cylinder::new_between(
+        knee,
+        ankle,
+        joint_diameter,
+        palette.legs,
+    ));
     scene
-        .cylinders
-        .push(Cylinder::new_between(hip, ankle, 0.16, palette.legs));
+        .spheres
+        .push(Sphere::new(knee, joint_diameter, palette.legs));
 }
 
 fn add_right_leg(scene: &mut Scene, base: Vec3, facing: Vec3, palette: &CharacterPalette) {
@@ -420,17 +465,19 @@ fn add_left_leg(scene: &mut Scene, base: Vec3, facing: Vec3, palette: &Character
 }
 
 fn add_foot(scene: &mut Scene, base: Vec3, facing: Vec3, side: f32, palette: &CharacterPalette) {
-    let center = transform_local(base, Vec3::new(0.22 * side, 0.12, 0.16), facing);
+    let center = transform_character_local(base, Vec3::new(0.22 * side, 0.12, 0.16), facing);
     let facing = facing.normalize();
     let size = if facing.x.abs() > facing.z.abs() {
         Vec3::new(0.42, 0.18, 0.28)
     } else {
         Vec3::new(0.28, 0.18, 0.42)
-    };
+    } * BIG_WALK_SCALE;
     scene.cubes.push(Cube::new(center, size, palette.feet));
-    scene
-        .spheres
-        .push(Sphere::new(center + facing * 0.18, 0.28, palette.feet));
+    scene.spheres.push(Sphere::new(
+        center + facing * scaled(0.18),
+        scaled(0.28),
+        palette.feet,
+    ));
 }
 
 fn add_right_foot(scene: &mut Scene, base: Vec3, facing: Vec3, palette: &CharacterPalette) {
@@ -481,8 +528,29 @@ mod tests {
         );
 
         assert_eq!(scene.cubes.len(), 2);
-        assert_eq!(scene.spheres.len(), 7);
-        assert_eq!(scene.cylinders.len(), 12);
+        assert_eq!(scene.spheres.len(), 14);
+        assert_eq!(scene.cylinders.len(), 14);
+    }
+
+    #[test]
+    fn leg_segments_are_equal_and_share_a_rounded_knee() {
+        let mut scene = Scene {
+            cubes: Vec::new(),
+            spheres: Vec::new(),
+            cylinders: Vec::new(),
+        };
+        add_leg(
+            &mut scene,
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, -1.0),
+            1.0,
+            &CharacterPalette::big_walk(),
+        );
+
+        assert_eq!(scene.cylinders.len(), 2);
+        assert_eq!(scene.spheres.len(), 1);
+        assert!((scene.cylinders[0].half_length - scene.cylinders[1].half_length).abs() < 0.0001);
+        assert!((scene.cylinders[0].radius - scene.spheres[0].radius).abs() < 0.0001);
     }
 
     #[test]
@@ -496,6 +564,16 @@ mod tests {
         assert!((point.x - 2.0).abs() < 0.0001);
         assert!((point.y - 1.0).abs() < 0.0001);
         assert!((point.z - 1.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn eye_discs_protrude_from_the_head_and_overlap() {
+        let head_radius = 0.87 * 0.5;
+        let eye_outer_face = EYE_LATERAL_OFFSET + EYE_HALF_THICKNESS;
+        let pupil_inner_face = EYE_LATERAL_OFFSET + PUPIL_OUTWARD_OFFSET - PUPIL_HALF_THICKNESS;
+
+        assert!(eye_outer_face > head_radius);
+        assert!(pupil_inner_face <= eye_outer_face);
     }
 
     #[test]
