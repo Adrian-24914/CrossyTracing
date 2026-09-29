@@ -151,7 +151,19 @@ fn trace_primary(
     else {
         return resources.skybox.sample(ray.direction);
     };
-    let mut surface = shade(ray, hit, material, light_direction);
+    let hit_point = ray.origin + ray.direction * hit.distance;
+    let shadowed = material.finish != Finish::Unlit
+        && hit.normal.dot(light_direction) > 0.0
+        && is_shadowed(
+            hit_point,
+            hit.normal,
+            light_direction,
+            cubes,
+            spheres,
+            cylinders,
+            forest_props,
+        );
+    let mut surface = shade_with_shadow(ray, hit, material, light_direction, shadowed);
     if material.transparency > 0.0 {
         let behind = closest_hit(
             ray,
@@ -169,7 +181,6 @@ fn trace_primary(
     }
 
     if material.reflectivity > 0.0 {
-        let hit_point = ray.origin + ray.direction * hit.distance;
         let reflected_direction =
             (ray.direction - hit.normal * (2.0 * ray.direction.dot(hit.normal))).normalize();
         let reflected_ray = Ray::new(hit_point + hit.normal * 0.002, reflected_direction);
@@ -197,11 +208,25 @@ fn trace_primary(
 }
 
 fn shade(ray: &Ray, hit: Hit, material: Material, light_direction: Vec3) -> Color {
+    shade_with_shadow(ray, hit, material, light_direction, false)
+}
+
+fn shade_with_shadow(
+    ray: &Ray,
+    hit: Hit,
+    material: Material,
+    light_direction: Vec3,
+    shadowed: bool,
+) -> Color {
     if material.finish == Finish::Unlit {
         return material.albedo;
     }
 
-    let diffuse = hit.normal.dot(light_direction).max(0.0);
+    let diffuse = if shadowed {
+        0.0
+    } else {
+        hit.normal.dot(light_direction).max(0.0)
+    };
     let sky_visibility = (hit.normal.y * 0.5 + 0.5).clamp(0.0, 1.0);
     let ambient = AMBIENT_LIGHT + SKY_FILL_LIGHT * sky_visibility;
     let base = material
@@ -218,6 +243,27 @@ fn shade(ray: &Ray, hit: Hit, material: Material, light_direction: Vec3) -> Colo
         .powf(material.shininess)
         * material.specular_strength;
     blend(Color::new(255, 255, 255), base, highlight)
+}
+
+fn is_shadowed(
+    hit_point: Vec3,
+    normal: Vec3,
+    light_direction: Vec3,
+    cubes: &[Cube],
+    spheres: &[Sphere],
+    cylinders: &[Cylinder],
+    forest_props: &[ForestProp],
+) -> bool {
+    let shadow_ray = Ray::new(hit_point + normal * 0.002, light_direction);
+    closest_hit(
+        &shadow_ray,
+        cubes,
+        spheres,
+        cylinders,
+        forest_props,
+        0.001,
+    )
+    .is_some()
 }
 
 fn blend(front: Color, behind: Color, opacity: f32) -> Color {
@@ -301,6 +347,46 @@ mod tests {
 
         assert!(color.r >= 45 && color.g >= 55 && color.b >= 35);
         assert!(color.r < 100 && color.g < 120 && color.b < 80);
+    }
+
+    #[test]
+    fn occluders_cast_a_shadow_toward_the_light() {
+        let cubes = [Cube::new(
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(0.6, 0.6, 0.6),
+            Color::new(80, 80, 80),
+        )];
+        let hit = Hit {
+            distance: 1.0,
+            normal: Vec3::new(0.0, 1.0, 0.0),
+        };
+        let ray = Ray::new(Vec3::default(), Vec3::new(0.0, -1.0, 0.0));
+        let light = Vec3::new(0.0, 1.0, 0.0);
+
+        assert!(is_shadowed(
+            Vec3::default(),
+            hit.normal,
+            light,
+            &cubes,
+            &[],
+            &[],
+            &[],
+        ));
+        let lit = shade_with_shadow(
+            &ray,
+            hit,
+            Material::matte(Color::new(100, 120, 80)),
+            light,
+            false,
+        );
+        let shadowed = shade_with_shadow(
+            &ray,
+            hit,
+            Material::matte(Color::new(100, 120, 80)),
+            light,
+            true,
+        );
+        assert!(shadowed.r < lit.r && shadowed.g < lit.g && shadowed.b < lit.b);
     }
 
     #[test]

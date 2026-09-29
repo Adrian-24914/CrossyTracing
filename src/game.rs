@@ -563,7 +563,7 @@ impl Game {
             seed ^ ((obstacle.column as u64 + 1) * 0x9E37_79B9) ^ (kind * 0x85EB_CA6B)
         });
         let (grass_tone_shifts, grass_blades) =
-            Self::generate_grass_decorations(kind, decoration_seed);
+            Self::generate_grass_decorations(kind, &obstacles, decoration_seed);
 
         Lane {
             environment: Environment::Forest,
@@ -604,6 +604,7 @@ impl Game {
 
     fn generate_grass_decorations(
         kind: LaneKind,
+        obstacles: &[ForestObstacle],
         mut seed: u64,
     ) -> (Vec<u8>, Vec<Vec<GrassBlade>>) {
         if kind != LaneKind::Grass {
@@ -612,8 +613,15 @@ impl Game {
 
         let mut tone_shifts = Vec::with_capacity(TILE_COLUMNS);
         let mut blades_per_tile = Vec::with_capacity(TILE_COLUMNS);
-        for _ in 0..TILE_COLUMNS {
+        for column in 0..TILE_COLUMNS {
             tone_shifts.push((5 + decoration_value(&mut seed) % 10) as u8);
+            let has_obstacle = obstacles.iter().any(|obstacle| obstacle.column == column);
+            let grass_chance_denominator = if has_obstacle { 6 } else { 3 };
+            if decoration_value(&mut seed) % grass_chance_denominator != 0 {
+                blades_per_tile.push(Vec::new());
+                continue;
+            }
+
             let blade_count = 3 + decoration_value(&mut seed) % 2;
             let mut blades = Vec::with_capacity(blade_count);
             for _ in 0..blade_count {
