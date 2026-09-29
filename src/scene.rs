@@ -3,7 +3,7 @@ use crate::{
     cube::Cube,
     cylinder::Cylinder,
     game::{Game, LANE_COUNT, TILE_COLUMNS, TILE_SPACING, WORLD_HALF_WIDTH},
-    material::Material,
+    material::{Material, TextureKind},
     math::Vec3,
     obstacle::ForestProp,
     player::add_player,
@@ -65,10 +65,15 @@ pub fn build_scene(game: &Game) -> Scene {
                 } else {
                     tint(base_color, 10)
                 };
-                cubes.push(Cube::new(
+                let material = if lane.kind == LaneKind::Grass {
+                    Material::textured(color, TextureKind::GroundGrass, 0.12, 20.0)
+                } else {
+                    Material::matte(color)
+                };
+                cubes.push(Cube::with_material(
                     Vec3::new(column_x(column), tile_y, lane_z),
                     Vec3::new(TILE_SPACING - 0.02, tile_height, TILE_SPACING - 0.02),
-                    color,
+                    material,
                 ));
             }
         }
@@ -297,6 +302,29 @@ mod tests {
             ((river.max.x - river.min.x) - (TILE_COLUMNS as f32 * TILE_SPACING - 0.02)).abs()
                 < 0.0001
         );
+    }
+
+    #[test]
+    fn ground_grass_texture_is_only_assigned_to_grass_tiles() {
+        let mut game = Game::new();
+        for lane in &mut game.lanes {
+            lane.environment = Environment::Forest;
+            lane.section_kind = SectionKind::Forest(ForestSectionKind::Clearing);
+            lane.kind = LaneKind::Stone;
+            lane.obstacles.clear();
+            lane.platform_columns.clear();
+            lane.railway = None;
+        }
+        game.lanes[0].kind = LaneKind::Grass;
+
+        let scene = build_scene(&game);
+        let textured_tiles = scene
+            .cubes
+            .iter()
+            .filter(|cube| cube.material.texture == TextureKind::GroundGrass)
+            .count();
+
+        assert_eq!(textured_tiles, TILE_COLUMNS);
     }
 
     #[test]

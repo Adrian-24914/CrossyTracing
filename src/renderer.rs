@@ -10,10 +10,17 @@ use crate::{
     ray::{Hit, Ray},
     skybox::Skybox,
     sphere::Sphere,
+    texture::Textures,
 };
 use std::thread;
 
 const AMBIENT_LIGHT: f32 = 0.22;
+
+#[derive(Clone, Copy)]
+pub struct RenderResources<'a> {
+    pub skybox: &'a Skybox,
+    pub textures: &'a Textures,
+}
 
 pub fn render(
     framebuffer: &mut Framebuffer,
@@ -22,7 +29,7 @@ pub fn render(
     spheres: &[Sphere],
     cylinders: &[Cylinder],
     forest_props: &[ForestProp],
-    skybox: &Skybox,
+    resources: RenderResources<'_>,
 ) {
     let light_direction = Vec3::new(-0.45, 0.85, 0.35).normalize();
     let width = framebuffer.width;
@@ -53,7 +60,7 @@ pub fn render(
                             cylinders,
                             forest_props,
                             light_direction,
-                            skybox,
+                            resources,
                         );
                         *pixel = color.to_hex();
                     }
@@ -138,13 +145,13 @@ fn trace_primary(
     cylinders: &[Cylinder],
     forest_props: &[ForestProp],
     light_direction: Vec3,
-    skybox: &Skybox,
+    resources: RenderResources<'_>,
 ) -> Color {
     let Some((hit, material)) = closest_hit(ray, cubes, spheres, cylinders, forest_props, 0.001)
     else {
-        return skybox.sample(ray.direction);
+        return resources.skybox.sample(ray.direction);
     };
-    let mut surface = shade(hit, material, light_direction, ray.direction * -1.0);
+    let mut surface = shade(ray, hit, material, light_direction, resources.textures);
     if material.transparency > 0.0 {
         let behind = closest_hit(
             ray,
@@ -156,13 +163,14 @@ fn trace_primary(
         )
         .map(|(behind_hit, behind_material)| {
             shade(
+                ray,
                 behind_hit,
                 behind_material,
                 light_direction,
-                ray.direction * -1.0,
+                resources.textures,
             )
         })
-        .unwrap_or_else(|| skybox.sample(ray.direction));
+        .unwrap_or_else(|| resources.skybox.sample(ray.direction));
         surface = blend(surface, behind, 1.0 - material.transparency);
     }
 
@@ -181,38 +189,58 @@ fn trace_primary(
         )
         .map(|(reflected_hit, reflected_material)| {
             shade(
+                &reflected_ray,
                 reflected_hit,
                 reflected_material,
                 light_direction,
-                reflected_direction * -1.0,
+                resources.textures,
             )
         })
-        .unwrap_or_else(|| skybox.sample(reflected_direction));
+        .unwrap_or_else(|| resources.skybox.sample(reflected_direction));
         surface = blend(reflected, surface, material.reflectivity);
     }
 
     surface
 }
 
-fn shade(hit: Hit, material: Material, light_direction: Vec3, view_direction: Vec3) -> Color {
+fn shade(
+    ray: &Ray,
+    hit: Hit,
+    material: Material,
+    light_direction: Vec3,
+    textures: &Textures,
+) -> Color {
+    let surface = textures.sample(
+        material.texture,
+        material.albedo,
+        hit.u,
+        hit.v,
+        hit.normal,
+        ray.direction,
+    );
     if material.finish == Finish::Unlit {
-        return material.albedo;
+        return surface.albedo;
     }
 
-    let diffuse = hit.normal.dot(light_direction).max(0.0);
-    let base = material
+    let diffuse = surface.normal.dot(light_direction).max(0.0);
+    let ambient = AMBIENT_LIGHT * surface.ambient_occlusion;
+    let base = surface
         .albedo
-        .lit(AMBIENT_LIGHT + diffuse * (1.0 - AMBIENT_LIGHT));
+        .lit(ambient + diffuse * (1.0 - AMBIENT_LIGHT));
     if material.finish != Finish::Glossy {
         return base;
     }
 
-    let reflected_light = hit.normal * (2.0 * hit.normal.dot(light_direction)) - light_direction;
+    let gloss = 1.0 - surface.roughness;
+    let shininess = 2.0 + (material.shininess - 2.0) * gloss * gloss;
+    let reflected_light =
+        surface.normal * (2.0 * surface.normal.dot(light_direction)) - light_direction;
     let highlight = reflected_light
-        .dot(view_direction)
+        .dot(ray.direction * -1.0)
         .max(0.0)
-        .powf(material.shininess)
-        * material.specular_strength;
+        .powf(shininess)
+        * material.specular_strength
+        * (0.25 + gloss * 0.75);
     blend(Color::new(255, 255, 255), base, highlight)
 }
 
@@ -246,8 +274,13 @@ mod tests {
             Color::new(220, 80, 60),
         )];
         let skybox = Skybox::solid(Color::new(50, 80, 120));
+        let textures = Textures::flat();
+        let resources = RenderResources {
+            skybox: &skybox,
+            textures: &textures,
+        };
 
-        render(&mut framebuffer, &camera, &cubes, &[], &[], &[], &skybox);
+        render(&mut framebuffer, &camera, &cubes, &[], &[], &[], resources);
 
         let visible_pixels = framebuffer
             .color
@@ -268,12 +301,17 @@ mod tests {
         let hit = Hit {
             distance: 1.0,
             normal: Vec3::new(0.0, -1.0, 0.0),
+            u: 0.0,
+            v: 0.0,
         };
+        let ray = Ray::new(Vec3::default(), Vec3::new(0.0, 0.0, 1.0));
+        let textures = Textures::flat();
         let color = shade(
+            &ray,
             hit,
             Material::unlit(Color::new(255, 255, 255)),
             Vec3::new(0.0, 1.0, 0.0),
-            Vec3::new(0.0, 0.0, 1.0),
+            &textures,
         );
 
         assert_eq!(color.to_hex(), 0xFFFFFF);
@@ -295,6 +333,11 @@ mod tests {
             ),
         ];
         let skybox = Skybox::solid(Color::new(50, 80, 120));
+        let textures = Textures::flat();
+        let resources = RenderResources {
+            skybox: &skybox,
+            textures: &textures,
+        };
 
         let color = trace_primary(
             &ray,
@@ -303,7 +346,7 @@ mod tests {
             &[],
             &[],
             Vec3::new(0.0, 0.0, 1.0),
-            &skybox,
+            resources,
         );
 
         assert_eq!(color.to_hex(), 0x7F007F);
@@ -318,6 +361,11 @@ mod tests {
             Material::reflective_glossy(Color::new(200, 0, 0), 0.0, 24.0, 0.5),
         )];
         let skybox = Skybox::solid(Color::new(100, 135, 190));
+        let textures = Textures::flat();
+        let resources = RenderResources {
+            skybox: &skybox,
+            textures: &textures,
+        };
 
         let color = trace_primary(
             &ray,
@@ -326,7 +374,7 @@ mod tests {
             &[],
             &[],
             Vec3::new(0.0, 1.0, 0.0),
-            &skybox,
+            resources,
         );
 
         assert!(color.r < 200);

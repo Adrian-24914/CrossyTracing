@@ -93,6 +93,8 @@ impl Cylinder {
                     closest = Some(Hit {
                         distance,
                         normal: self.axis * cap.signum(),
+                        u: 0.0,
+                        v: 0.0,
                     });
                 }
             }
@@ -129,6 +131,8 @@ impl Cylinder {
                 return Some(Hit {
                     distance,
                     normal: radial * (1.0 / self.radius),
+                    u: 0.0,
+                    v: 0.0,
                 });
             }
         }
