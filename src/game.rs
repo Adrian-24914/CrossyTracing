@@ -19,6 +19,12 @@ pub const BACK_Z: f32 = -4.05;
 pub const WORLD_HALF_WIDTH: f32 = TILE_COLUMNS as f32 * TILE_SPACING * 0.5;
 const DROP_START: f32 = 0.52;
 const PLAYER_COLLISION_RADIUS: f32 = 0.33;
+const PLAYER_JUMP_RISE_SECONDS: f32 = 0.11;
+const PLAYER_JUMP_HANG_SECONDS: f32 = 0.05;
+const PLAYER_JUMP_FALL_SECONDS: f32 = 0.08;
+const PLAYER_JUMP_DURATION_SECONDS: f32 =
+    PLAYER_JUMP_RISE_SECONDS + PLAYER_JUMP_HANG_SECONDS + PLAYER_JUMP_FALL_SECONDS;
+const PLAYER_JUMP_HEIGHT: f32 = 0.42;
 const RECENT_SECTION_LIMIT: usize = 6;
 const BOARD_ATTEMPTS: usize = 512;
 const SECTION_ATTEMPTS: usize = 96;
@@ -36,6 +42,12 @@ pub enum Move {
     Backward,
 }
 
+#[derive(Clone, Copy)]
+struct PlayerJump {
+    direction: Move,
+    elapsed: f32,
+}
+
 pub struct Game {
     pub lanes: Vec<Lane>,
     pub player_column: usize,
@@ -44,6 +56,7 @@ pub struct Game {
     pub score: u32,
     pub game_over: bool,
     pub paused: bool,
+    player_jump: Option<PlayerJump>,
     next_section_id: usize,
     pending_lanes: VecDeque<Lane>,
     recent_sections: VecDeque<SectionSignature>,
@@ -68,6 +81,7 @@ impl Game {
             score: 0,
             game_over: false,
             paused: false,
+            player_jump: None,
             next_section_id: 0,
             pending_lanes: VecDeque::new(),
             recent_sections: VecDeque::with_capacity(RECENT_SECTION_LIMIT),
@@ -85,6 +99,7 @@ impl Game {
         if self.paused || self.game_over || delta_seconds <= 0.0 {
             return false;
         }
+        self.update_player_jump(delta_seconds);
         self.update_railways(delta_seconds);
         self.cycle += delta_seconds / self.cycle_seconds();
         while self.cycle >= 1.0 {
@@ -156,6 +171,49 @@ impl Game {
             0.0
         };
         (y, z)
+    }
+
+    pub fn player_jump_offset(&self) -> (f32, f32, f32) {
+        let Some(jump) = self.player_jump else {
+            return (0.0, 0.0, 0.0);
+        };
+
+        let progress = (jump.elapsed / PLAYER_JUMP_DURATION_SECONDS).clamp(0.0, 1.0);
+        let horizontal_remaining = 1.0 - smoothstep(progress);
+        let height = if jump.elapsed < PLAYER_JUMP_RISE_SECONDS {
+            let rise = jump.elapsed / PLAYER_JUMP_RISE_SECONDS;
+            smoothstep(rise) * PLAYER_JUMP_HEIGHT
+        } else if jump.elapsed < PLAYER_JUMP_RISE_SECONDS + PLAYER_JUMP_HANG_SECONDS {
+            PLAYER_JUMP_HEIGHT
+        } else {
+            let fall = (jump.elapsed - PLAYER_JUMP_RISE_SECONDS - PLAYER_JUMP_HANG_SECONDS)
+                / PLAYER_JUMP_FALL_SECONDS;
+            (1.0 - fall.clamp(0.0, 1.0)) * PLAYER_JUMP_HEIGHT
+        };
+        let travel_offset = TILE_SPACING * horizontal_remaining;
+        let (x, z) = match jump.direction {
+            Move::Left => (travel_offset, 0.0),
+            Move::Right => (-travel_offset, 0.0),
+            Move::Forward => (0.0, travel_offset),
+            Move::Backward => (0.0, -travel_offset),
+        };
+
+        (x, height, z)
+    }
+
+    pub fn player_is_jumping(&self) -> bool {
+        self.player_jump.is_some()
+    }
+
+    fn update_player_jump(&mut self, delta_seconds: f32) {
+        let Some(jump) = &mut self.player_jump else {
+            return;
+        };
+
+        jump.elapsed += delta_seconds;
+        if jump.elapsed >= PLAYER_JUMP_DURATION_SECONDS {
+            self.player_jump = None;
+        }
     }
 
     pub fn try_move(&mut self, direction: Move) -> bool {
@@ -613,6 +671,13 @@ impl Game {
     }
 }
 
+fn decoration_value(seed: &mut u64) -> usize {
+    *seed = seed
+        .wrapping_mul(6_364_136_223_846_793_005)
+        .wrapping_add(1_442_695_040_888_963_407);
+    ((*seed >> 32) as usize) % 1_001
+}
+
 fn section_has_crossing(lanes: &[Lane]) -> bool {
     let mut ordered = lanes.to_vec();
     ordered.reverse();
@@ -927,6 +992,52 @@ mod tests {
         game.lanes[game.player_lane] = lane;
         assert!(game.try_move(Move::Left));
         assert_eq!(game.player_column, 2);
+    }
+
+    #[test]
+    fn successful_move_animates_a_jump_from_the_previous_tile() {
+        let mut game = Game::with_seed(1);
+        game.player_column = 3;
+        let lane = game.generate_forest_lane(700, ForestSectionKind::Clearing, 0, None);
+        game.lanes[game.player_lane] = lane;
+
+        assert!(game.try_move(Move::Left));
+        assert!(game.player_is_jumping());
+        let start = game.player_jump_offset();
+        assert!((start.0 - TILE_SPACING).abs() < 0.0001);
+        assert!(start.1.abs() < 0.0001);
+        assert!(start.2.abs() < 0.0001);
+
+        game.update(PLAYER_JUMP_RISE_SECONDS);
+        let apex = game.player_jump_offset();
+        assert!((apex.1 - PLAYER_JUMP_HEIGHT).abs() < 0.0001);
+
+        game.update(PLAYER_JUMP_HANG_SECONDS);
+        let end_of_hang = game.player_jump_offset();
+        assert!((end_of_hang.1 - PLAYER_JUMP_HEIGHT).abs() < 0.0001);
+
+        game.update(PLAYER_JUMP_FALL_SECONDS * 0.5);
+        let falling = game.player_jump_offset();
+        assert!((falling.1 - PLAYER_JUMP_HEIGHT * 0.5).abs() < 0.0001);
+
+        game.update(PLAYER_JUMP_FALL_SECONDS);
+        assert!(!game.player_is_jumping());
+        assert_eq!(game.player_jump_offset(), (0.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn blocked_move_does_not_start_a_jump() {
+        let mut game = Game::with_seed(1);
+        game.player_column = 3;
+        let lane = game.generate_forest_lane(701, ForestSectionKind::Clearing, 1, Some(3));
+        game.lanes[game.player_lane] = lane;
+        game.lanes[game.player_lane].obstacles = vec![ForestObstacle {
+            column: 2,
+            kind: ForestObstacleKind::Rock,
+        }];
+
+        assert!(!game.try_move(Move::Left));
+        assert_eq!(game.player_jump_offset(), (0.0, 0.0, 0.0));
     }
 
     #[test]

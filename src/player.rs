@@ -17,6 +17,12 @@ const EYE_HALF_THICKNESS: f32 = 0.022;
 const PUPIL_OUTWARD_OFFSET: f32 = 0.035;
 const PUPIL_HALF_THICKNESS: f32 = 0.015;
 
+#[derive(Clone, Copy)]
+enum CharacterPose {
+    Idle,
+    Jumping,
+}
+
 pub struct CharacterPalette {
     pub head: Color,
     pub beak: Color,
@@ -58,11 +64,21 @@ pub fn add_player(scene: &mut Scene, game: &Game) {
         Environment::Railway => 0.30,
     };
     let facing = Vec3::new(0.0, 0.0, -1.0);
-    let tile_center = Vec3::new(x, lane_y + surface_height, lane_z);
+    let (jump_x, jump_y, jump_z) = game.player_jump_offset();
+    let tile_center = Vec3::new(
+        x + jump_x,
+        lane_y + surface_height + jump_y,
+        lane_z + jump_z,
+    );
     let base = tile_center - facing * scaled(BIG_WALK_CENTER_OFFSET);
     let palette = CharacterPalette::big_walk();
+    let pose = if game.player_is_jumping() {
+        CharacterPose::Jumping
+    } else {
+        CharacterPose::Idle
+    };
 
-    add_big_walk_character(scene, base, facing, &palette);
+    add_big_walk_character(scene, base, facing, &palette, pose);
 }
 
 fn transform_local(base: Vec3, local: Vec3, facing: Vec3) -> Vec3 {
@@ -81,17 +97,23 @@ fn scaled(value: f32) -> f32 {
     value * BIG_WALK_SCALE
 }
 
-fn add_big_walk_character(scene: &mut Scene, base: Vec3, facing: Vec3, palette: &CharacterPalette) {
-    add_left_leg(scene, base, facing, palette);
-    add_right_leg(scene, base, facing, palette);
-    add_left_foot(scene, base, facing, palette);
-    add_right_foot(scene, base, facing, palette);
+fn add_big_walk_character(
+    scene: &mut Scene,
+    base: Vec3,
+    facing: Vec3,
+    palette: &CharacterPalette,
+    pose: CharacterPose,
+) {
+    add_left_leg(scene, base, facing, palette, pose);
+    add_right_leg(scene, base, facing, palette, pose);
+    add_left_foot(scene, base, facing, palette, pose);
+    add_right_foot(scene, base, facing, palette, pose);
     add_hips(scene, base, facing, palette);
     add_torso(scene, base, facing, palette);
-    add_left_arm(scene, base, facing, palette);
-    add_right_arm(scene, base, facing, palette);
-    add_left_hand(scene, base, facing, palette);
-    add_right_hand(scene, base, facing, palette);
+    add_left_arm(scene, base, facing, palette, pose);
+    add_right_arm(scene, base, facing, palette, pose);
+    add_left_hand(scene, base, facing, palette, pose);
+    add_right_hand(scene, base, facing, palette, pose);
     add_head(scene, base, facing, palette);
     add_left_eye(scene, base, facing, palette);
     add_right_eye(scene, base, facing, palette);
@@ -221,50 +243,121 @@ fn add_arm(
         .push(Sphere::new(elbow, joint_diameter, palette.arms));
 }
 
-fn add_right_arm(scene: &mut Scene, base: Vec3, facing: Vec3, palette: &CharacterPalette) {
-    add_arm(
-        scene,
-        base,
-        facing,
-        Vec3::new(0.30, 2.70, 0.0),
-        Vec3::new(0.62, 2.35, 0.0),
-        Vec3::new(0.92, 1.78, 0.0),
-        palette,
-    );
+fn arm_points(side: f32, pose: CharacterPose) -> (Vec3, Vec3, Vec3) {
+    let shoulder = Vec3::new(0.30 * side, 2.70, 0.0);
+    match pose {
+        CharacterPose::Idle => {
+            let wrist_y = if side > 0.0 { 1.78 } else { 1.95 };
+            (
+                shoulder,
+                Vec3::new(0.62 * side, 2.35, 0.0),
+                Vec3::new(0.92 * side, wrist_y, 0.0),
+            )
+        }
+        CharacterPose::Jumping => (
+            shoulder,
+            Vec3::new(0.58 * side, 2.96, 0.04),
+            Vec3::new(0.84 * side, 3.18, 0.10),
+        ),
+    }
 }
 
-fn add_left_arm(scene: &mut Scene, base: Vec3, facing: Vec3, palette: &CharacterPalette) {
-    add_arm(
-        scene,
-        base,
-        facing,
-        Vec3::new(-0.30, 2.70, 0.0),
-        Vec3::new(-0.62, 2.35, 0.0),
-        Vec3::new(-0.92, 1.95, 0.0),
-        palette,
-    );
+fn add_arm_for_side(
+    scene: &mut Scene,
+    base: Vec3,
+    facing: Vec3,
+    side: f32,
+    palette: &CharacterPalette,
+    pose: CharacterPose,
+) {
+    let (shoulder, elbow, wrist) = arm_points(side, pose);
+    add_arm(scene, base, facing, shoulder, elbow, wrist, palette);
 }
 
-fn add_right_hand(scene: &mut Scene, base: Vec3, facing: Vec3, palette: &CharacterPalette) {
+fn add_right_arm(
+    scene: &mut Scene,
+    base: Vec3,
+    facing: Vec3,
+    palette: &CharacterPalette,
+    pose: CharacterPose,
+) {
+    add_arm_for_side(scene, base, facing, 1.0, palette, pose);
+}
+
+fn add_left_arm(
+    scene: &mut Scene,
+    base: Vec3,
+    facing: Vec3,
+    palette: &CharacterPalette,
+    pose: CharacterPose,
+) {
+    add_arm_for_side(scene, base, facing, -1.0, palette, pose);
+}
+
+fn add_hand(
+    scene: &mut Scene,
+    base: Vec3,
+    facing: Vec3,
+    side: f32,
+    palette: &CharacterPalette,
+    pose: CharacterPose,
+) {
+    let (_, _, wrist) = arm_points(side, pose);
     scene.spheres.push(Sphere::new(
-        transform_character_local(base, Vec3::new(0.92, 1.78, 0.0), facing),
+        transform_character_local(base, wrist, facing),
         scaled(0.25),
         palette.hands,
     ));
 }
 
-fn add_left_hand(scene: &mut Scene, base: Vec3, facing: Vec3, palette: &CharacterPalette) {
-    scene.spheres.push(Sphere::new(
-        transform_character_local(base, Vec3::new(-0.92, 1.95, 0.0), facing),
-        scaled(0.25),
-        palette.hands,
-    ));
+fn add_right_hand(
+    scene: &mut Scene,
+    base: Vec3,
+    facing: Vec3,
+    palette: &CharacterPalette,
+    pose: CharacterPose,
+) {
+    add_hand(scene, base, facing, 1.0, palette, pose);
 }
 
-fn add_leg(scene: &mut Scene, base: Vec3, facing: Vec3, side: f32, palette: &CharacterPalette) {
-    let hip = transform_character_local(base, Vec3::new(0.22 * side, 1.25, 0.0), facing);
-    let knee = transform_character_local(base, Vec3::new(0.22 * side, 0.735, 0.0), facing);
-    let ankle = transform_character_local(base, Vec3::new(0.22 * side, 0.22, 0.0), facing);
+fn add_left_hand(
+    scene: &mut Scene,
+    base: Vec3,
+    facing: Vec3,
+    palette: &CharacterPalette,
+    pose: CharacterPose,
+) {
+    add_hand(scene, base, facing, -1.0, palette, pose);
+}
+
+fn leg_points(side: f32, pose: CharacterPose) -> (Vec3, Vec3, Vec3) {
+    let hip = Vec3::new(0.22 * side, 1.25, 0.0);
+    match pose {
+        CharacterPose::Idle => (
+            hip,
+            Vec3::new(0.22 * side, 0.735, 0.0),
+            Vec3::new(0.22 * side, 0.22, 0.0),
+        ),
+        CharacterPose::Jumping => (
+            hip,
+            Vec3::new(0.42 * side, 0.92, 0.18),
+            Vec3::new(0.30 * side, 0.62, -0.12),
+        ),
+    }
+}
+
+fn add_leg(
+    scene: &mut Scene,
+    base: Vec3,
+    facing: Vec3,
+    side: f32,
+    palette: &CharacterPalette,
+    pose: CharacterPose,
+) {
+    let (hip, knee, ankle) = leg_points(side, pose);
+    let hip = transform_character_local(base, hip, facing);
+    let knee = transform_character_local(base, knee, facing);
+    let ankle = transform_character_local(base, ankle, facing);
     let joint_diameter = scaled(0.16);
     scene.cylinders.push(Cylinder::new_between(
         hip,
@@ -283,16 +376,42 @@ fn add_leg(scene: &mut Scene, base: Vec3, facing: Vec3, side: f32, palette: &Cha
         .push(Sphere::new(knee, joint_diameter, palette.legs));
 }
 
-fn add_right_leg(scene: &mut Scene, base: Vec3, facing: Vec3, palette: &CharacterPalette) {
-    add_leg(scene, base, facing, 1.0, palette);
+fn add_right_leg(
+    scene: &mut Scene,
+    base: Vec3,
+    facing: Vec3,
+    palette: &CharacterPalette,
+    pose: CharacterPose,
+) {
+    add_leg(scene, base, facing, 1.0, palette, pose);
 }
 
-fn add_left_leg(scene: &mut Scene, base: Vec3, facing: Vec3, palette: &CharacterPalette) {
-    add_leg(scene, base, facing, -1.0, palette);
+fn add_left_leg(
+    scene: &mut Scene,
+    base: Vec3,
+    facing: Vec3,
+    palette: &CharacterPalette,
+    pose: CharacterPose,
+) {
+    add_leg(scene, base, facing, -1.0, palette, pose);
 }
 
-fn add_foot(scene: &mut Scene, base: Vec3, facing: Vec3, side: f32, palette: &CharacterPalette) {
-    let center = transform_character_local(base, Vec3::new(0.22 * side, 0.12, 0.16), facing);
+fn foot_center(side: f32, pose: CharacterPose) -> Vec3 {
+    match pose {
+        CharacterPose::Idle => Vec3::new(0.22 * side, 0.12, 0.16),
+        CharacterPose::Jumping => Vec3::new(0.30 * side, 0.52, 0.04),
+    }
+}
+
+fn add_foot(
+    scene: &mut Scene,
+    base: Vec3,
+    facing: Vec3,
+    side: f32,
+    palette: &CharacterPalette,
+    pose: CharacterPose,
+) {
+    let center = transform_character_local(base, foot_center(side, pose), facing);
     let facing = facing.normalize();
     let size = if facing.x.abs() > facing.z.abs() {
         Vec3::new(0.42, 0.18, 0.28)
@@ -307,12 +426,24 @@ fn add_foot(scene: &mut Scene, base: Vec3, facing: Vec3, side: f32, palette: &Ch
     ));
 }
 
-fn add_right_foot(scene: &mut Scene, base: Vec3, facing: Vec3, palette: &CharacterPalette) {
-    add_foot(scene, base, facing, 1.0, palette);
+fn add_right_foot(
+    scene: &mut Scene,
+    base: Vec3,
+    facing: Vec3,
+    palette: &CharacterPalette,
+    pose: CharacterPose,
+) {
+    add_foot(scene, base, facing, 1.0, palette, pose);
 }
 
-fn add_left_foot(scene: &mut Scene, base: Vec3, facing: Vec3, palette: &CharacterPalette) {
-    add_foot(scene, base, facing, -1.0, palette);
+fn add_left_foot(
+    scene: &mut Scene,
+    base: Vec3,
+    facing: Vec3,
+    palette: &CharacterPalette,
+    pose: CharacterPose,
+) {
+    add_foot(scene, base, facing, -1.0, palette, pose);
 }
 
 fn column_x(column: usize) -> f32 {
@@ -341,6 +472,7 @@ mod tests {
             Vec3::new(0.0, 0.0, 0.0),
             Vec3::new(0.0, 0.0, -1.0),
             &CharacterPalette::big_walk(),
+            CharacterPose::Idle,
         );
 
         assert_eq!(scene.cubes.len(), 2);
@@ -356,6 +488,7 @@ mod tests {
             Vec3::default(),
             Vec3::new(0.0, 0.0, -1.0),
             &CharacterPalette::big_walk(),
+            CharacterPose::Idle,
         );
 
         let unlit: Vec<_> = scene
@@ -392,12 +525,27 @@ mod tests {
             Vec3::new(0.0, 0.0, -1.0),
             1.0,
             &CharacterPalette::big_walk(),
+            CharacterPose::Idle,
         );
 
         assert_eq!(scene.cylinders.len(), 2);
         assert_eq!(scene.spheres.len(), 1);
         assert!((scene.cylinders[0].half_length - scene.cylinders[1].half_length).abs() < 0.0001);
         assert!((scene.cylinders[0].radius - scene.spheres[0].radius).abs() < 0.0001);
+    }
+
+    #[test]
+    fn jumping_pose_raises_the_hands_and_tucks_the_legs() {
+        let (_, _, idle_wrist) = arm_points(1.0, CharacterPose::Idle);
+        let (_, _, jumping_wrist) = arm_points(1.0, CharacterPose::Jumping);
+        let (_, _, idle_ankle) = leg_points(1.0, CharacterPose::Idle);
+        let (_, _, jumping_ankle) = leg_points(1.0, CharacterPose::Jumping);
+        let idle_foot = foot_center(1.0, CharacterPose::Idle);
+        let jumping_foot = foot_center(1.0, CharacterPose::Jumping);
+
+        assert!(jumping_wrist.y > idle_wrist.y);
+        assert!(jumping_ankle.y > idle_ankle.y);
+        assert!(jumping_foot.y > idle_foot.y);
     }
 
     #[test]
