@@ -10,8 +10,6 @@ pub struct Ray {
 pub struct Hit {
     pub distance: f32,
     pub normal: Vec3,
-    pub u: f32,
-    pub v: f32,
 }
 
 impl Ray {

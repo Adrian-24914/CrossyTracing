@@ -61,34 +61,10 @@ impl Cube {
             return None;
         }
 
-        let point = ray.origin + ray.direction * near;
-        let (u, v) = face_uv(point, normal, self.min, self.max);
         Some(Hit {
             distance: near,
             normal,
-            u,
-            v,
         })
-    }
-}
-
-fn face_uv(point: Vec3, normal: Vec3, minimum: Vec3, maximum: Vec3) -> (f32, f32) {
-    let x = ((point.x - minimum.x) / (maximum.x - minimum.x)).clamp(0.0, 1.0);
-    let y = ((point.y - minimum.y) / (maximum.y - minimum.y)).clamp(0.0, 1.0);
-    let z = ((point.z - minimum.z) / (maximum.z - minimum.z)).clamp(0.0, 1.0);
-
-    if normal.y > 0.5 {
-        (x, 1.0 - z)
-    } else if normal.y < -0.5 {
-        (x, z)
-    } else if normal.x > 0.5 {
-        (z, 1.0 - y)
-    } else if normal.x < -0.5 {
-        (1.0 - z, 1.0 - y)
-    } else if normal.z > 0.5 {
-        (x, y)
-    } else {
-        (1.0 - x, y)
     }
 }
 
@@ -148,27 +124,5 @@ mod tests {
         let ray = Ray::new(Vec3::new(3.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
 
         assert!(cube.intersect(&ray).is_none());
-    }
-
-    #[test]
-    fn texture_coordinates_move_with_the_cube() {
-        let first = Cube::new(
-            Vec3::new(0.0, 0.0, 0.0),
-            Vec3::new(2.0, 1.0, 2.0),
-            Color::new(255, 255, 255),
-        );
-        let moved = Cube::new(
-            Vec3::new(0.0, 0.0, 0.73),
-            Vec3::new(2.0, 1.0, 2.0),
-            Color::new(255, 255, 255),
-        );
-        let first_ray = Ray::new(Vec3::new(0.25, 2.0, 0.18), Vec3::new(0.0, -1.0, 0.0));
-        let moved_ray = Ray::new(Vec3::new(0.25, 2.0, 0.91), Vec3::new(0.0, -1.0, 0.0));
-
-        let first_hit = first.intersect(&first_ray).unwrap();
-        let moved_hit = moved.intersect(&moved_ray).unwrap();
-
-        assert!((first_hit.u - moved_hit.u).abs() < 0.0001);
-        assert!((first_hit.v - moved_hit.v).abs() < 0.0001);
     }
 }

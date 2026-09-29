@@ -14,15 +14,6 @@ pub struct Cylinder {
 }
 
 impl Cylinder {
-    pub fn new_x(center: Vec3, length: f32, diameter: f32, color: Color) -> Self {
-        Self::new_between(
-            center - Vec3::new(length * 0.5, 0.0, 0.0),
-            center + Vec3::new(length * 0.5, 0.0, 0.0),
-            diameter,
-            color,
-        )
-    }
-
     pub fn new_x_with_material(
         center: Vec3,
         length: f32,
@@ -90,11 +81,10 @@ impl Cylinder {
                 let point = offset + ray.direction * distance;
                 let radial = point - self.axis * cap;
                 if radial.dot(radial) <= self.radius * self.radius {
+                    let cap_sign = cap.signum();
                     closest = Some(Hit {
                         distance,
-                        normal: self.axis * cap.signum(),
-                        u: 0.0,
-                        v: 0.0,
+                        normal: self.axis * cap_sign,
                     });
                 }
             }
@@ -128,12 +118,8 @@ impl Cylinder {
             if axial_distance.abs() <= self.half_length {
                 let point = offset + ray.direction * distance;
                 let radial = point - self.axis * axial_distance;
-                return Some(Hit {
-                    distance,
-                    normal: radial * (1.0 / self.radius),
-                    u: 0.0,
-                    v: 0.0,
-                });
+                let normal = radial * (1.0 / self.radius);
+                return Some(Hit { distance, normal });
             }
         }
         None
@@ -145,7 +131,12 @@ mod tests {
     use super::*;
 
     fn test_cylinder() -> Cylinder {
-        Cylinder::new_x(Vec3::new(0.0, 0.0, 0.0), 4.0, 2.0, Color::new(140, 90, 50))
+        Cylinder::new_x_with_material(
+            Vec3::new(0.0, 0.0, 0.0),
+            4.0,
+            2.0,
+            Material::matte(Color::new(140, 90, 50)),
+        )
     }
 
     #[test]

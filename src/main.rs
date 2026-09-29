@@ -14,7 +14,6 @@ mod renderer;
 mod scene;
 mod skybox;
 mod sphere;
-mod texture;
 mod train;
 mod tree;
 mod window;
@@ -31,7 +30,6 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use texture::Textures;
 use window::{Key, NativeWindow};
 
 const WIDTH: usize = 800;
@@ -47,12 +45,7 @@ fn main() {
     );
     let mut game = Game::new();
     let skybox = Skybox::load().expect("No se pudo cargar assets/skybox/runtime");
-    let textures =
-        Textures::load().expect("No se pudo cargar assets/textures/ground_grass/runtime");
-    let render_resources = RenderResources {
-        skybox: &skybox,
-        textures: &textures,
-    };
+    let render_resources = RenderResources { skybox: &skybox };
     let mut scene = scene::build_scene(&game);
     let mut previous_frame = Instant::now();
 

@@ -29,11 +29,11 @@ impl Tree {
         let trunk_diameters = [0.42, 0.34, 0.26, 0.17];
         let trunk_colors = [dark, color, dark, light];
         for index in 0..trunk_diameters.len() {
-            cylinders.push(Cylinder::new_between(
+            cylinders.push(Cylinder::new_between_with_material(
                 base + Vec3::new(0.0, trunk_levels[index], 0.0),
                 base + Vec3::new(0.0, trunk_levels[index + 1], 0.0),
                 trunk_diameters[index],
-                trunk_colors[index],
+                wood_material(trunk_colors[index]),
             ));
         }
 
@@ -59,11 +59,11 @@ impl Tree {
             let start = base + Vec3::new(0.0, start_height, 0.0);
             let tip = start + direction * horizontal_length + Vec3::new(0.0, rise, 0.0);
 
-            cylinders.push(Cylinder::new_between(
+            cylinders.push(Cylinder::new_between_with_material(
                 start,
                 tip,
                 0.15 - branch_index as f32 * 0.01,
-                color,
+                wood_material(color),
             ));
             *anchor = FoliageAnchor {
                 position: tip,
@@ -109,6 +109,10 @@ impl Tree {
     }
 }
 
+fn wood_material(color: Color) -> Material {
+    Material::matte(color)
+}
+
 fn ray_misses_sphere(ray: &Ray, center: Vec3, radius: f32) -> bool {
     let offset = ray.origin - center;
     let distance_squared = offset.dot(offset);
@@ -136,6 +140,10 @@ mod tests {
             .windows(2)
             .all(|segments| segments[1].radius < segments[0].radius));
         assert_eq!(tree.cylinders[4..].len(), 4);
+        assert!(tree
+            .cylinders
+            .iter()
+            .all(|cylinder| cylinder.material.finish == crate::material::Finish::Matte));
     }
 
     #[test]

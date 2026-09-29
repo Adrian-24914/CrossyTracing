@@ -47,8 +47,6 @@ impl Sphere {
         Some(Hit {
             distance,
             normal: (point - self.center) * (1.0 / self.radius),
-            u: 0.0,
-            v: 0.0,
         })
     }
 }

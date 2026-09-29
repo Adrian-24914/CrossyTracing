@@ -14,12 +14,12 @@ impl Color {
         ((self.r as u32) << 16) | ((self.g as u32) << 8) | self.b as u32
     }
 
-    pub fn lit(self, intensity: f32) -> Self {
-        let intensity = intensity.clamp(0.0, 1.0);
+    pub fn lit_with_exposure(self, intensity: f32, exposure: f32) -> Self {
+        let scale = (intensity.max(0.0) * exposure.max(0.0)).min(1.1);
         Self::new(
-            (self.r as f32 * intensity) as u8,
-            (self.g as f32 * intensity) as u8,
-            (self.b as f32 * intensity) as u8,
+            (self.r as f32 * scale).min(255.0) as u8,
+            (self.g as f32 * scale).min(255.0) as u8,
+            (self.b as f32 * scale).min(255.0) as u8,
         )
     }
 }

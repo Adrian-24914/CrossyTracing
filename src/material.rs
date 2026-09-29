@@ -7,16 +7,9 @@ pub enum Finish {
     Glossy,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TextureKind {
-    None,
-    GroundGrass,
-}
-
 #[derive(Clone, Copy, Debug)]
 pub struct Material {
     pub albedo: Color,
-    pub texture: TextureKind,
     pub finish: Finish,
     pub specular_strength: f32,
     pub shininess: f32,
@@ -28,7 +21,6 @@ impl Material {
     pub const fn matte(albedo: Color) -> Self {
         Self {
             albedo,
-            texture: TextureKind::None,
             finish: Finish::Matte,
             specular_strength: 0.0,
             shininess: 1.0,
@@ -37,27 +29,9 @@ impl Material {
         }
     }
 
-    pub const fn textured(
-        albedo: Color,
-        texture: TextureKind,
-        specular_strength: f32,
-        shininess: f32,
-    ) -> Self {
-        Self {
-            albedo,
-            texture,
-            finish: Finish::Glossy,
-            specular_strength,
-            shininess,
-            transparency: 0.0,
-            reflectivity: 0.0,
-        }
-    }
-
     pub const fn unlit(albedo: Color) -> Self {
         Self {
             albedo,
-            texture: TextureKind::None,
             finish: Finish::Unlit,
             specular_strength: 0.0,
             shininess: 1.0,
@@ -69,7 +43,6 @@ impl Material {
     pub const fn glossy(albedo: Color, specular_strength: f32, shininess: f32) -> Self {
         Self {
             albedo,
-            texture: TextureKind::None,
             finish: Finish::Glossy,
             specular_strength,
             shininess,
@@ -81,7 +54,6 @@ impl Material {
     pub const fn translucent_matte(albedo: Color, transparency: f32) -> Self {
         Self {
             albedo,
-            texture: TextureKind::None,
             finish: Finish::Matte,
             specular_strength: 0.0,
             shininess: 1.0,
@@ -98,7 +70,6 @@ impl Material {
     ) -> Self {
         Self {
             albedo,
-            texture: TextureKind::None,
             finish: Finish::Glossy,
             specular_strength,
             shininess,
@@ -117,19 +88,13 @@ mod tests {
         let white = Material::unlit(Color::new(255, 255, 255));
         let water = Material::translucent_matte(Color::new(52, 129, 164), 0.42);
         let metal = Material::reflective_glossy(Color::new(174, 53, 45), 0.3, 28.0, 0.24);
-        let ground = Material::textured(
-            Color::new(78, 145, 82),
-            TextureKind::GroundGrass,
-            0.12,
-            20.0,
-        );
+        let ground = Material::matte(Color::new(78, 145, 82));
 
         assert_eq!(white.finish, Finish::Unlit);
         assert_eq!(white.albedo.to_hex(), 0xFFFFFF);
         assert_eq!(water.finish, Finish::Matte);
         assert!((water.transparency - 0.42).abs() < 0.0001);
         assert!((metal.reflectivity - 0.24).abs() < 0.0001);
-        assert_eq!(ground.texture, TextureKind::GroundGrass);
-        assert_eq!(ground.finish, Finish::Glossy);
+        assert_eq!(ground.finish, Finish::Matte);
     }
 }

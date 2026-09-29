@@ -2,8 +2,9 @@ use crate::{
     random::Random,
     train::train_x_bounds,
     world::{
-        Environment, ForestObstacle, ForestObstacleKind, ForestSectionKind, Lane, LaneKind,
-        RailwayPhase, RailwayState, Section, SectionKind, SectionSignature, TrainDirection,
+        Environment, ForestObstacle, ForestObstacleKind, ForestSectionKind, GrassBlade, Lane,
+        LaneKind, RailwayPhase, RailwayState, Section, SectionKind, SectionSignature,
+        TrainDirection,
     },
 };
 use std::{
@@ -249,6 +250,10 @@ impl Game {
                 } else if lane > previous_lane {
                     self.score = self.score.saturating_sub(1);
                 }
+                self.player_jump = Some(PlayerJump {
+                    direction,
+                    elapsed: 0.0,
+                });
             }
         }
         true
@@ -431,6 +436,8 @@ impl Game {
             section_id,
             kind: LaneKind::Rail,
             obstacles: Vec::new(),
+            grass_tone_shifts: vec![0; TILE_COLUMNS],
+            grass_blades: vec![Vec::new(); TILE_COLUMNS],
             platform_columns: Vec::new(),
             railway: Some(RailwayState {
                 phase: RailwayPhase::Warning,
@@ -535,22 +542,37 @@ impl Game {
             });
         }
         self.random.shuffle(&mut obstacle_kinds);
-        let obstacles = obstacle_columns
+        let obstacles: Vec<ForestObstacle> = obstacle_columns
             .into_iter()
             .zip(obstacle_kinds)
             .map(|(column, kind)| ForestObstacle { column, kind })
             .collect();
 
+        let kind = if self.random.range(7) == 0 {
+            LaneKind::Stone
+        } else {
+            LaneKind::Grass
+        };
+        let decoration_seed = obstacles.iter().fold(section_id as u64, |seed, obstacle| {
+            let kind = match obstacle.kind {
+                ForestObstacleKind::Tree => 1_u64,
+                ForestObstacleKind::Rock => 2,
+                ForestObstacleKind::FallenLog => 3,
+                ForestObstacleKind::Bush => 4,
+            };
+            seed ^ ((obstacle.column as u64 + 1) * 0x9E37_79B9) ^ (kind * 0x85EB_CA6B)
+        });
+        let (grass_tone_shifts, grass_blades) =
+            Self::generate_grass_decorations(kind, decoration_seed);
+
         Lane {
             environment: Environment::Forest,
             section_kind: SectionKind::Forest(section_kind),
             section_id,
-            kind: if self.random.range(7) == 0 {
-                LaneKind::Stone
-            } else {
-                LaneKind::Grass
-            },
+            kind,
             obstacles,
+            grass_tone_shifts,
+            grass_blades,
             platform_columns: Vec::new(),
             railway: None,
         }
@@ -573,9 +595,42 @@ impl Game {
             section_id,
             kind: LaneKind::Water,
             obstacles: Vec::new(),
+            grass_tone_shifts: vec![0; TILE_COLUMNS],
+            grass_blades: vec![Vec::new(); TILE_COLUMNS],
             platform_columns,
             railway: None,
         }
+    }
+
+    fn generate_grass_decorations(
+        kind: LaneKind,
+        mut seed: u64,
+    ) -> (Vec<u8>, Vec<Vec<GrassBlade>>) {
+        if kind != LaneKind::Grass {
+            return (vec![0; TILE_COLUMNS], vec![Vec::new(); TILE_COLUMNS]);
+        }
+
+        let mut tone_shifts = Vec::with_capacity(TILE_COLUMNS);
+        let mut blades_per_tile = Vec::with_capacity(TILE_COLUMNS);
+        for _ in 0..TILE_COLUMNS {
+            tone_shifts.push((5 + decoration_value(&mut seed) % 10) as u8);
+            let blade_count = 3 + decoration_value(&mut seed) % 2;
+            let mut blades = Vec::with_capacity(blade_count);
+            for _ in 0..blade_count {
+                let local = |seed: &mut u64| {
+                    (decoration_value(seed) as f32 / 1_000.0 - 0.5) * (TILE_SPACING - 0.16)
+                };
+                blades.push(GrassBlade {
+                    local_x: local(&mut seed),
+                    local_z: local(&mut seed),
+                    width: 0.035 + decoration_value(&mut seed) as f32 / 1_000.0 * 0.03,
+                    height: 0.11 + decoration_value(&mut seed) as f32 / 1_000.0 * 0.13,
+                });
+            }
+            blades_per_tile.push(blades);
+        }
+
+        (tone_shifts, blades_per_tile)
     }
 
     fn choose_forest_kind(&mut self) -> ForestSectionKind {

@@ -26,6 +26,14 @@ pub struct ForestObstacle {
     pub kind: ForestObstacleKind,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GrassBlade {
+    pub local_x: f32,
+    pub local_z: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SectionKind {
     Forest(ForestSectionKind),
@@ -84,6 +92,8 @@ pub struct Lane {
     pub section_id: usize,
     pub kind: LaneKind,
     pub obstacles: Vec<ForestObstacle>,
+    pub grass_tone_shifts: Vec<u8>,
+    pub grass_blades: Vec<Vec<GrassBlade>>,
     pub platform_columns: Vec<usize>,
     pub railway: Option<RailwayState>,
 }

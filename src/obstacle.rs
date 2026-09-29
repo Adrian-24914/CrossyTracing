@@ -75,27 +75,27 @@ fn rock(base: Vec3) -> CompoundObstacle {
     let dark = shade(stone, -18);
     let light = shade(stone, 16);
     let cubes = vec![
-        Cube::new(
+        stone_cube(
             base + Vec3::new(0.0, 0.17, 0.0),
             Vec3::new(0.62, 0.34, 0.55),
             stone,
         ),
-        Cube::new(
+        stone_cube(
             base + Vec3::new(-0.24, 0.15, 0.12),
             Vec3::new(0.38, 0.30, 0.36),
             dark,
         ),
-        Cube::new(
+        stone_cube(
             base + Vec3::new(0.25, 0.13, -0.11),
             Vec3::new(0.40, 0.26, 0.42),
             dark,
         ),
-        Cube::new(
+        stone_cube(
             base + Vec3::new(-0.06, 0.39, 0.01),
             Vec3::new(0.34, 0.28, 0.32),
             light,
         ),
-        Cube::new(
+        stone_cube(
             base + Vec3::new(0.18, 0.31, 0.18),
             Vec3::new(0.25, 0.22, 0.26),
             stone,
@@ -110,19 +110,23 @@ fn rock(base: Vec3) -> CompoundObstacle {
     }
 }
 
+fn stone_cube(center: Vec3, size: Vec3, color: Color) -> Cube {
+    Cube::with_material(center, size, Material::matte(color))
+}
+
 fn fallen_log(base: Vec3, color: Color) -> CompoundObstacle {
     let cylinders = vec![
-        Cylinder::new_between(
+        Cylinder::new_between_with_material(
             base + Vec3::new(-0.48, 0.20, -0.10),
             base + Vec3::new(0.48, 0.20, 0.10),
             0.34,
-            color,
+            wood_material(color),
         ),
-        Cylinder::new_between(
+        Cylinder::new_between_with_material(
             base + Vec3::new(0.04, 0.28, 0.01),
             base + Vec3::new(0.31, 0.53, 0.29),
             0.15,
-            shade(color, 12),
+            wood_material(shade(color, 12)),
         ),
     ];
     CompoundObstacle {
@@ -132,6 +136,10 @@ fn fallen_log(base: Vec3, color: Color) -> CompoundObstacle {
         bounds_center: base + Vec3::new(0.0, 0.30, 0.0),
         bounds_radius: 0.78,
     }
+}
+
+fn wood_material(color: Color) -> Material {
+    Material::matte(color)
 }
 
 fn bush(base: Vec3) -> CompoundObstacle {
@@ -205,6 +213,10 @@ mod tests {
             panic!("se esperaba una roca");
         };
         assert_eq!(model.cubes.len(), 5);
+        assert!(model
+            .cubes
+            .iter()
+            .all(|cube| cube.material.finish == crate::material::Finish::Matte));
         assert!(model.spheres.is_empty());
         assert!(model.cylinders.is_empty());
     }
@@ -219,6 +231,10 @@ mod tests {
             panic!("se esperaba un tronco");
         };
         assert_eq!(model.cylinders.len(), 2);
+        assert!(model
+            .cylinders
+            .iter()
+            .all(|cylinder| cylinder.material.finish == crate::material::Finish::Matte));
     }
 
     #[test]
