@@ -158,9 +158,6 @@ fn trace_primary(
             hit_point,
             hit.normal,
             light_direction,
-            cubes,
-            spheres,
-            cylinders,
             forest_props,
         );
     let mut surface = shade_with_shadow(ray, hit, material, light_direction, shadowed);
@@ -258,21 +255,12 @@ fn is_shadowed(
     hit_point: Vec3,
     normal: Vec3,
     light_direction: Vec3,
-    cubes: &[Cube],
-    spheres: &[Sphere],
-    cylinders: &[Cylinder],
     forest_props: &[ForestProp],
 ) -> bool {
     let shadow_ray = Ray::new(hit_point + normal * 0.002, light_direction);
-    closest_hit(
-        &shadow_ray,
-        cubes,
-        spheres,
-        cylinders,
-        forest_props,
-        0.001,
-    )
-    .is_some()
+    forest_props
+        .iter()
+        .any(|prop| prop.intersect(&shadow_ray).is_some())
 }
 
 fn blend(front: Color, behind: Color, opacity: f32) -> Color {
@@ -368,9 +356,9 @@ mod tests {
 
     #[test]
     fn occluders_cast_a_shadow_toward_the_light() {
-        let cubes = [Cube::new(
-            Vec3::new(0.0, 1.0, 0.0),
-            Vec3::new(0.6, 0.6, 0.6),
+        let forest_props = [ForestProp::new(
+            crate::world::ForestObstacleKind::Tree,
+            Vec3::default(),
             Color::new(80, 80, 80),
         )];
         let hit = Hit {
@@ -384,10 +372,7 @@ mod tests {
             Vec3::default(),
             hit.normal,
             light,
-            &cubes,
-            &[],
-            &[],
-            &[],
+            &forest_props,
         ));
         let lit = shade_with_shadow(
             &ray,

@@ -78,7 +78,20 @@ pub fn add_player(scene: &mut Scene, game: &Game) {
         CharacterPose::Idle
     };
 
+    add_contact_shadow(
+        scene,
+        Vec3::new(x + jump_x, lane_y + surface_height + 0.012, lane_z + jump_z),
+    );
     add_big_walk_character(scene, base, facing, &palette, pose);
+}
+
+fn add_contact_shadow(scene: &mut Scene, center: Vec3) {
+    scene.cylinders.push(Cylinder::new_between_with_material(
+        center - Vec3::new(0.0, 0.012, 0.0),
+        center + Vec3::new(0.0, 0.012, 0.0),
+        scaled(1.85),
+        Material::translucent_matte(Color::new(18, 28, 21), 0.48),
+    ));
 }
 
 fn transform_local(base: Vec3, local: Vec3, facing: Vec3) -> Vec3 {
@@ -546,6 +559,18 @@ mod tests {
         assert!(jumping_wrist.y > idle_wrist.y);
         assert!(jumping_ankle.y > idle_ankle.y);
         assert!(jumping_foot.y > idle_foot.y);
+    }
+
+    #[test]
+    fn contact_shadow_is_a_thin_translucent_disc() {
+        let mut scene = empty_scene();
+        add_contact_shadow(&mut scene, Vec3::new(1.0, 0.2, -2.0));
+
+        assert_eq!(scene.cylinders.len(), 1);
+        let shadow = &scene.cylinders[0];
+        assert!(shadow.axis.y > 0.99);
+        assert!(shadow.half_length < shadow.radius * 0.05);
+        assert!((shadow.material.transparency - 0.48).abs() < 0.0001);
     }
 
     #[test]
