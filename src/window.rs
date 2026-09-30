@@ -23,6 +23,7 @@ const VK_UP: usize = 0x26;
 const VK_RIGHT: usize = 0x27;
 const VK_DOWN: usize = 0x28;
 const VK_R: usize = 0x52;
+const VK_O: usize = 0x4F;
 
 #[derive(Clone, Copy)]
 pub enum Key {
@@ -32,6 +33,7 @@ pub enum Key {
     Down,
     Pause,
     Reset,
+    Orthographic,
 }
 
 #[repr(C)]
@@ -246,6 +248,7 @@ impl NativeWindow {
                         0x53 | VK_DOWN => pressed.push(Key::Down),
                         VK_SPACE => pressed.push(Key::Pause),
                         VK_R => pressed.push(Key::Reset),
+                        VK_O => pressed.push(Key::Orthographic),
                         _ => {}
                     }
                 }
@@ -265,6 +268,7 @@ impl NativeWindow {
                 Key::Down => key_down(0x53) || key_down(VK_DOWN),
                 Key::Pause => key_down(VK_SPACE),
                 Key::Reset => key_down(VK_R),
+                Key::Orthographic => key_down(VK_O),
             }
         }
     }

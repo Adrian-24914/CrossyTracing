@@ -22,7 +22,7 @@ mod world;
 use framebuffer::Framebuffer;
 use game::{Game, Move};
 use math::Vec3;
-use orbit_camera::OrbitCamera;
+use orbit_camera::{OrbitCamera, Projection};
 use renderer::RenderResources;
 use skybox::Skybox;
 use std::{
@@ -58,7 +58,7 @@ fn main() {
         &scene.forest_props,
         render_resources,
     );
-    update_title(&window, &game);
+    update_title(&window, &game, &camera);
 
     loop {
         let Some(keys) = window.pump_messages() else {
@@ -75,6 +75,10 @@ fn main() {
         }
         if keys.iter().any(|key| matches!(key, Key::Pause)) {
             game.toggle_pause();
+        }
+        if keys.iter().any(|key| matches!(key, Key::Orthographic)) {
+            camera.toggle_projection();
+            changed = true;
         }
 
         if game.paused {
@@ -101,7 +105,7 @@ fn main() {
                     Key::Right => Some(Move::Right),
                     Key::Up => Some(Move::Forward),
                     Key::Down => Some(Move::Backward),
-                    Key::Pause | Key::Reset => None,
+                    Key::Pause | Key::Reset | Key::Orthographic => None,
                 };
                 if let Some(direction) = direction {
                     changed |= game.try_move(direction);
@@ -121,14 +125,14 @@ fn main() {
                 &scene.forest_props,
                 render_resources,
             );
-            update_title(&window, &game);
+            update_title(&window, &game, &camera);
         }
         window.present(&framebuffer.color);
         thread::sleep(Duration::from_millis(16));
     }
 }
 
-fn update_title(window: &NativeWindow, game: &Game) {
+fn update_title(window: &NativeWindow, game: &Game, camera: &OrbitCamera) {
     let state = if game.game_over {
         "FIN - presiona R"
     } else if game.paused {
@@ -136,8 +140,12 @@ fn update_title(window: &NativeWindow, game: &Game) {
     } else {
         "jugando"
     };
+    let projection = match camera.projection() {
+        Projection::Perspective => "perspectiva",
+        Projection::Orthographic => "ortográfica",
+    };
     window.set_title(&format!(
-        "Creative Zone | Puntos: {} | {} | WASD/Flechas, Espacio, R",
-        game.score, state
+        "Creative Zone | Puntos: {} | {} | {} | WASD/Flechas, Espacio, O, R",
+        game.score, state, projection
     ));
 }

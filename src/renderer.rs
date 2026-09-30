@@ -51,8 +51,7 @@ pub fn render(
                 for (local_y, row) in pixels.chunks_mut(width).enumerate() {
                     let y = start_y + local_y;
                     for (x, pixel) in row.iter_mut().enumerate() {
-                        let direction = camera.ray_direction(x, y, width, height);
-                        let ray = Ray::new(camera.eye, direction);
+                        let ray = camera.ray(x, y, width, height);
                         let color = trace_primary(
                             &ray,
                             cubes,
