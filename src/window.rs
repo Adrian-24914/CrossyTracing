@@ -34,6 +34,7 @@ pub enum Key {
     Pause,
     Reset,
     Orthographic,
+    Start,
 }
 
 #[repr(C)]
@@ -244,7 +245,8 @@ impl NativeWindow {
                         }
                         0x41 | VK_LEFT => pressed.push(Key::Left),
                         0x44 | VK_RIGHT => pressed.push(Key::Right),
-                        0x57 | VK_UP => pressed.push(Key::Up),
+                        0x57 => pressed.push(Key::Start),
+                        VK_UP => pressed.push(Key::Up),
                         0x53 | VK_DOWN => pressed.push(Key::Down),
                         VK_SPACE => pressed.push(Key::Pause),
                         VK_R => pressed.push(Key::Reset),
@@ -269,6 +271,7 @@ impl NativeWindow {
                 Key::Pause => key_down(VK_SPACE),
                 Key::Reset => key_down(VK_R),
                 Key::Orthographic => key_down(VK_O),
+                Key::Start => key_down(0x57),
             }
         }
     }

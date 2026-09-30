@@ -153,12 +153,7 @@ fn trace_primary(
     let hit_point = ray.origin + ray.direction * hit.distance;
     let shadowed = material.finish != Finish::Unlit
         && hit.normal.dot(light_direction) > 0.0
-        && is_shadowed(
-            hit_point,
-            hit.normal,
-            light_direction,
-            forest_props,
-        );
+        && is_shadowed(hit_point, hit.normal, light_direction, forest_props);
     let mut surface = shade_with_shadow(ray, hit, material, light_direction, shadowed);
     if material.transparency > 0.0 {
         let behind = closest_hit(

@@ -109,8 +109,7 @@ mod tests {
 
     #[test]
     fn orthographic_rays_keep_their_direction_but_shift_their_origin() {
-        let mut camera =
-            OrbitCamera::new(Vec3::new(8.0, 6.0, 10.0), Vec3::default(), 0.75);
+        let mut camera = OrbitCamera::new(Vec3::new(8.0, 6.0, 10.0), Vec3::default(), 0.75);
         camera.toggle_projection();
 
         let left = camera.ray(0, 50, 200, 100);
