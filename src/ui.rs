@@ -4,8 +4,6 @@ use std::{
     process::Command,
 };
 
-const TRANSPARENT_KEY: u32 = 0xFF00FF;
-
 pub struct UiAssets {
     intro: Option<Bitmap>,
     death: Option<Bitmap>,
@@ -72,9 +70,13 @@ fn is_current(source: &Path, destination: &Path) -> bool {
     let Ok(source_time) = fs::metadata(source).and_then(|metadata| metadata.modified()) else {
         return false;
     };
-    fs::metadata(destination)
-        .and_then(|metadata| metadata.modified())
-        .is_ok_and(|destination_time| destination_time >= source_time)
+    let is_alpha_bitmap = fs::read(destination)
+        .ok()
+        .is_some_and(|bytes| read_u16(&bytes, 28) == Some(32));
+    is_alpha_bitmap
+        && fs::metadata(destination)
+            .and_then(|metadata| metadata.modified())
+            .is_ok_and(|destination_time| destination_time >= source_time)
 }
 
 pub fn blur(pixels: &mut [u32], width: usize, height: usize) {
@@ -197,9 +199,10 @@ fn draw_image_centered(
                 continue;
             }
             let source = image.pixels[image_y * image.width + image_x];
-            if source != TRANSPARENT_KEY {
+            let alpha = (source >> 24) as f32 / 255.0;
+            if alpha > 0.0 {
                 let index = target_y as usize * width + target_x as usize;
-                pixels[index] = blend(pixels[index], source, opacity);
+                pixels[index] = blend(pixels[index], source & 0x00FF_FFFF, opacity * alpha);
             }
         }
     }
@@ -316,14 +319,16 @@ impl Bitmap {
         let signed_height = read_i32(&bytes, 22)?;
         if width <= 0
             || signed_height == 0
-            || read_u16(&bytes, 28)? != 24
+            || !matches!(read_u16(&bytes, 28)?, 24 | 32)
             || read_u32(&bytes, 30)? != 0
         {
             return None;
         }
         let width = width as usize;
         let height = signed_height.unsigned_abs() as usize;
-        let stride = (width * 3).div_ceil(4) * 4;
+        let bits_per_pixel = read_u16(&bytes, 28)? as usize;
+        let bytes_per_pixel = bits_per_pixel / 8;
+        let stride = (width * bytes_per_pixel).div_ceil(4) * 4;
         if pixel_offset + stride * height > bytes.len() {
             return None;
         }
@@ -333,9 +338,15 @@ impl Bitmap {
             let source_y = if bottom_up { height - 1 - y } else { y };
             let start = pixel_offset + source_y * stride;
             for x in 0..width {
-                let pixel = start + x * 3;
+                let pixel = start + x * bytes_per_pixel;
+                let alpha = if bytes_per_pixel == 4 {
+                    bytes[pixel + 3]
+                } else {
+                    0xFF
+                };
                 pixels.push(
-                    (bytes[pixel + 2] as u32) << 16
+                    (alpha as u32) << 24
+                        | (bytes[pixel + 2] as u32) << 16
                         | (bytes[pixel + 1] as u32) << 8
                         | bytes[pixel] as u32,
                 );

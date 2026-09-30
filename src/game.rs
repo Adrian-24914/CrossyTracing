@@ -19,6 +19,7 @@ pub const TILE_SPACING: f32 = 1.35;
 pub const BACK_Z: f32 = -4.05;
 pub const WORLD_HALF_WIDTH: f32 = TILE_COLUMNS as f32 * TILE_SPACING * 0.5;
 const DROP_START: f32 = 0.52;
+const CLIFF_DROP_DISTANCE: f32 = 2.8;
 const PLAYER_COLLISION_RADIUS: f32 = 0.33;
 const PLAYER_JUMP_RISE_SECONDS: f32 = 0.11;
 const PLAYER_JUMP_HANG_SECONDS: f32 = 0.05;
@@ -43,6 +44,12 @@ pub enum Move {
     Backward,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeathKind {
+    Hazard,
+    FellOffWorld,
+}
+
 #[derive(Clone, Copy)]
 struct PlayerJump {
     direction: Move,
@@ -58,6 +65,9 @@ pub struct Game {
     pub game_over: bool,
     pub paused: bool,
     player_jump: Option<PlayerJump>,
+    pending_death: bool,
+    death_kind: Option<DeathKind>,
+    cliff_fall_position: Option<(f32, f32, f32)>,
     next_section_id: usize,
     pending_lanes: VecDeque<Lane>,
     recent_sections: VecDeque<SectionSignature>,
@@ -83,6 +93,9 @@ impl Game {
             game_over: false,
             paused: false,
             player_jump: None,
+            pending_death: false,
+            death_kind: None,
+            cliff_fall_position: None,
             next_section_id: 0,
             pending_lanes: VecDeque::new(),
             recent_sections: VecDeque::with_capacity(RECENT_SECTION_LIMIT),
@@ -101,6 +114,12 @@ impl Game {
             return false;
         }
         self.update_player_jump(delta_seconds);
+        if self.pending_death && self.player_jump.is_none() {
+            self.pending_death = false;
+            self.game_over = true;
+            self.death_kind = Some(DeathKind::Hazard);
+            return true;
+        }
         self.update_railways(delta_seconds);
         self.cycle += delta_seconds / self.cycle_seconds();
         while self.cycle >= 1.0 {
@@ -131,6 +150,7 @@ impl Game {
             && player_x - PLAYER_COLLISION_RADIUS <= train_max
         {
             self.game_over = true;
+            self.death_kind = Some(DeathKind::Hazard);
         }
     }
 
@@ -206,6 +226,14 @@ impl Game {
         self.player_jump.is_some()
     }
 
+    pub fn death_kind(&self) -> Option<DeathKind> {
+        self.death_kind
+    }
+
+    pub fn cliff_fall_position(&self) -> Option<(f32, f32, f32)> {
+        self.cliff_fall_position
+    }
+
     fn update_player_jump(&mut self, delta_seconds: f32) {
         let Some(jump) = &mut self.player_jump else {
             return;
@@ -218,7 +246,7 @@ impl Game {
     }
 
     pub fn try_move(&mut self, direction: Move) -> bool {
-        if self.paused || self.game_over {
+        if self.paused || self.game_over || self.pending_death {
             return false;
         }
         let previous_lane = self.player_lane;
@@ -241,7 +269,11 @@ impl Game {
         self.player_column = column;
         self.player_lane = lane;
         if !supported {
-            self.game_over = true;
+            self.player_jump = Some(PlayerJump {
+                direction,
+                elapsed: 0.0,
+            });
+            self.pending_death = true;
         } else {
             self.check_train_collision();
             if !self.game_over {
@@ -321,6 +353,20 @@ impl Game {
     }
 
     fn recycle_front_lane(&mut self) {
+        let cliff_fall_position = (self.player_lane == LANE_COUNT - 1).then(|| {
+            let lane = &self.lanes[self.player_lane];
+            let surface_height = match lane.environment {
+                Environment::Forest => 0.14,
+                Environment::River if lane.supports_player(self.player_column) => 0.37,
+                Environment::River => -0.11,
+                Environment::Railway => 0.30,
+            };
+            (
+                column_x(self.player_column),
+                -CLIFF_DROP_DISTANCE + surface_height,
+                BACK_Z + LANE_COUNT as f32 * TILE_SPACING,
+            )
+        });
         self.lanes.pop();
         let new_lane = self.next_valid_lane();
         self.lanes.insert(0, new_lane);
@@ -328,6 +374,8 @@ impl Game {
         if self.player_lane >= LANE_COUNT {
             self.player_lane = LANE_COUNT - 1;
             self.game_over = true;
+            self.death_kind = Some(DeathKind::FellOffWorld);
+            self.cliff_fall_position = cliff_fall_position;
         }
     }
 
@@ -1193,9 +1241,31 @@ mod tests {
         game.lanes[target_lane] = river;
 
         assert!(game.try_move(Move::Forward));
+        assert!(!game.game_over);
+        assert!(game.player_is_jumping());
+        assert!(!game.try_move(Move::Forward));
+        game.update(PLAYER_JUMP_DURATION_SECONDS);
         assert!(game.game_over);
         assert_eq!(game.score, 0);
         assert_eq!(game.player_lane, target_lane);
+    }
+
+    #[test]
+    fn falling_off_the_world_keeps_the_departing_position() {
+        let mut game = Game::with_seed(19);
+        game.player_lane = LANE_COUNT - 1;
+        let player_x = column_x(game.player_column);
+
+        game.recycle_front_lane();
+
+        assert!(game.game_over);
+        assert_eq!(game.death_kind(), Some(DeathKind::FellOffWorld));
+        let (x, y, z) = game
+            .cliff_fall_position()
+            .expect("la caída guarda su origen");
+        assert!((x - player_x).abs() < 0.0001);
+        assert!(y < -2.0);
+        assert!(z > BACK_Z);
     }
 
     #[test]

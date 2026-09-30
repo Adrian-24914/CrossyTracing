@@ -16,11 +16,44 @@ const EYE_LATERAL_OFFSET: f32 = 0.415;
 const EYE_HALF_THICKNESS: f32 = 0.022;
 const PUPIL_OUTWARD_OFFSET: f32 = 0.035;
 const PUPIL_HALF_THICKNESS: f32 = 0.015;
+pub const PLAYER_DEATH_DURATION_SECONDS: f32 = 1.0;
+pub const PLAYER_DEATH_FALL_THROUGH_SECONDS: f32 = 1.5;
+pub const PLAYER_DEATH_ANIMATION_SECONDS: f32 =
+    PLAYER_DEATH_DURATION_SECONDS + PLAYER_DEATH_FALL_THROUGH_SECONDS;
+const PLAYER_DEATH_RISE_SECONDS: f32 = 0.15;
+const PLAYER_DEATH_HANG_SECONDS: f32 = 0.27;
+const PLAYER_DEATH_FALL_SECONDS: f32 =
+    PLAYER_DEATH_DURATION_SECONDS - PLAYER_DEATH_RISE_SECONDS - PLAYER_DEATH_HANG_SECONDS;
+const PLAYER_DEATH_JUMP_HEIGHT: f32 = 0.62;
+const PLAYER_DEATH_FALL_THROUGH_SPEED: f32 = 2.4;
 
 #[derive(Clone, Copy)]
 enum CharacterPose {
     Idle,
     Jumping,
+    Dying,
+}
+
+#[derive(Clone, Copy)]
+pub enum PlayerAnimation {
+    Alive,
+    Dying {
+        elapsed: f32,
+        camera_position: Vec3,
+        kind: DeathAnimationKind,
+    },
+}
+
+#[derive(Clone, Copy)]
+pub enum DeathAnimationKind {
+    Standard,
+    CliffFall { origin: Vec3 },
+}
+
+#[derive(Clone, Copy)]
+struct DeathMotion {
+    lift: f32,
+    fall_angle: f32,
 }
 
 pub struct CharacterPalette {
@@ -53,7 +86,7 @@ impl CharacterPalette {
     }
 }
 
-pub fn add_player(scene: &mut Scene, game: &Game) {
+pub fn add_player(scene: &mut Scene, game: &Game, animation: PlayerAnimation) {
     let x = column_x(game.player_column);
     let (lane_y, lane_z) = game.lane_position(game.player_lane);
     let lane = &game.lanes[game.player_lane];
@@ -63,26 +96,157 @@ pub fn add_player(scene: &mut Scene, game: &Game) {
         Environment::River => -0.11,
         Environment::Railway => 0.30,
     };
-    let facing = Vec3::new(0.0, 0.0, -1.0);
+    let (facing, death_motion, cliff_origin) = match animation {
+        PlayerAnimation::Alive => (Vec3::new(0.0, 0.0, -1.0), None, None),
+        PlayerAnimation::Dying {
+            elapsed,
+            camera_position,
+            kind: DeathAnimationKind::Standard,
+        } => (
+            death_facing(camera_position - Vec3::new(x, lane_y, lane_z)),
+            Some(death_motion(elapsed)),
+            None,
+        ),
+        PlayerAnimation::Dying {
+            kind: DeathAnimationKind::CliffFall { origin },
+            ..
+        } => (Vec3::new(0.0, 0.0, -1.0), None, Some(origin)),
+    };
     let (jump_x, jump_y, jump_z) = game.player_jump_offset();
-    let tile_center = Vec3::new(
-        x + jump_x,
-        lane_y + surface_height + jump_y,
-        lane_z + jump_z,
+    let tile_center = cliff_origin.map_or_else(
+        || {
+            Vec3::new(
+                x + jump_x,
+                lane_y + surface_height + jump_y + death_motion.map_or(0.0, |motion| motion.lift),
+                lane_z + jump_z,
+            )
+        },
+        |origin| origin + Vec3::new(0.0, cliff_fall_offset(animation_elapsed(animation)), 0.0),
     );
     let base = tile_center - facing * scaled(BIG_WALK_CENTER_OFFSET);
     let palette = CharacterPalette::big_walk();
-    let pose = if game.player_is_jumping() {
-        CharacterPose::Jumping
-    } else {
-        CharacterPose::Idle
+    let pose = match animation {
+        PlayerAnimation::Dying {
+            kind: DeathAnimationKind::Standard,
+            ..
+        } => CharacterPose::Dying,
+        PlayerAnimation::Dying {
+            kind: DeathAnimationKind::CliffFall { .. },
+            ..
+        } => CharacterPose::Idle,
+        PlayerAnimation::Alive if game.player_is_jumping() => CharacterPose::Jumping,
+        PlayerAnimation::Alive => CharacterPose::Idle,
     };
 
-    add_contact_shadow(
-        scene,
-        Vec3::new(x + jump_x, lane_y + surface_height + 0.012, lane_z + jump_z),
-    );
+    if cliff_origin.is_none() {
+        add_contact_shadow(
+            scene,
+            Vec3::new(x + jump_x, lane_y + surface_height + 0.012, lane_z + jump_z),
+        );
+    }
+    let cube_start = scene.cubes.len();
+    let sphere_start = scene.spheres.len();
+    let cylinder_start = scene.cylinders.len();
     add_big_walk_character(scene, base, facing, &palette, pose);
+    if let Some(motion) = death_motion {
+        tilt_character_back(
+            scene,
+            cube_start,
+            sphere_start,
+            cylinder_start,
+            base,
+            facing,
+            motion.fall_angle,
+        );
+    }
+}
+
+fn death_facing(camera_offset: Vec3) -> Vec3 {
+    let horizontal = Vec3::new(camera_offset.x, 0.0, camera_offset.z);
+    if horizontal.dot(horizontal) < 0.000_001 {
+        Vec3::new(0.0, 0.0, -1.0)
+    } else {
+        horizontal.normalize()
+    }
+}
+
+fn animation_elapsed(animation: PlayerAnimation) -> f32 {
+    match animation {
+        PlayerAnimation::Alive => 0.0,
+        PlayerAnimation::Dying { elapsed, .. } => elapsed,
+    }
+}
+
+fn cliff_fall_offset(elapsed: f32) -> f32 {
+    let time = elapsed.clamp(0.0, PLAYER_DEATH_ANIMATION_SECONDS);
+    -0.7 * time - 2.5 * time * time
+}
+
+fn death_motion(elapsed: f32) -> DeathMotion {
+    if elapsed <= PLAYER_DEATH_RISE_SECONDS {
+        let rise = elapsed / PLAYER_DEATH_RISE_SECONDS;
+        return DeathMotion {
+            lift: PLAYER_DEATH_JUMP_HEIGHT * (1.0 - (1.0 - rise) * (1.0 - rise)),
+            fall_angle: 0.0,
+        };
+    }
+    if elapsed <= PLAYER_DEATH_RISE_SECONDS + PLAYER_DEATH_HANG_SECONDS {
+        return DeathMotion {
+            lift: PLAYER_DEATH_JUMP_HEIGHT,
+            fall_angle: 0.0,
+        };
+    }
+
+    let fall = ((elapsed - PLAYER_DEATH_RISE_SECONDS - PLAYER_DEATH_HANG_SECONDS)
+        / PLAYER_DEATH_FALL_SECONDS)
+        .clamp(0.0, 1.0);
+    let fall_through = (elapsed - PLAYER_DEATH_DURATION_SECONDS)
+        .clamp(0.0, PLAYER_DEATH_FALL_THROUGH_SECONDS)
+        * PLAYER_DEATH_FALL_THROUGH_SPEED;
+    DeathMotion {
+        lift: PLAYER_DEATH_JUMP_HEIGHT * (1.0 - fall * fall) - fall_through,
+        fall_angle: 1.42 * fall * fall,
+    }
+}
+
+fn tilt_character_back(
+    scene: &mut Scene,
+    cube_start: usize,
+    sphere_start: usize,
+    cylinder_start: usize,
+    anchor: Vec3,
+    facing: Vec3,
+    angle: f32,
+) {
+    if angle <= 0.0 {
+        return;
+    }
+    for cube in &mut scene.cubes[cube_start..] {
+        let center = (cube.min + cube.max) * 0.5;
+        let size = cube.max - cube.min;
+        let rotated = rotate_back(center - anchor, facing, angle) + anchor;
+        cube.min = rotated - size * 0.5;
+        cube.max = rotated + size * 0.5;
+    }
+    for sphere in &mut scene.spheres[sphere_start..] {
+        sphere.center = rotate_back(sphere.center - anchor, facing, angle) + anchor;
+    }
+    for cylinder in &mut scene.cylinders[cylinder_start..] {
+        cylinder.center = rotate_back(cylinder.center - anchor, facing, angle) + anchor;
+        cylinder.axis = rotate_back(cylinder.axis, facing, angle).normalize();
+    }
+}
+
+fn rotate_back(vector: Vec3, facing: Vec3, angle: f32) -> Vec3 {
+    const UP: Vec3 = Vec3::new(0.0, 1.0, 0.0);
+
+    let facing = facing.normalize();
+    let right = facing.cross(&UP).normalize();
+    let side = right * vector.dot(right);
+    let vertical = vector.dot(UP);
+    let forward = vector.dot(facing);
+    side + UP * (vertical * angle.cos() + forward * angle.sin())
+        + facing * (forward * angle.cos() - vertical * angle.sin())
 }
 
 fn add_contact_shadow(scene: &mut Scene, center: Vec3) {
@@ -272,6 +436,11 @@ fn arm_points(side: f32, pose: CharacterPose) -> (Vec3, Vec3, Vec3) {
             Vec3::new(0.58 * side, 2.96, 0.04),
             Vec3::new(0.84 * side, 3.18, 0.10),
         ),
+        CharacterPose::Dying => (
+            shoulder,
+            Vec3::new(0.75 * side, 2.88, -0.18),
+            Vec3::new(1.12 * side, 3.04, -0.38),
+        ),
     }
 }
 
@@ -356,6 +525,11 @@ fn leg_points(side: f32, pose: CharacterPose) -> (Vec3, Vec3, Vec3) {
             Vec3::new(0.42 * side, 0.92, 0.18),
             Vec3::new(0.30 * side, 0.62, -0.12),
         ),
+        CharacterPose::Dying => (
+            hip,
+            Vec3::new(0.35 * side, 0.82, -0.24),
+            Vec3::new(0.50 * side, 0.42, -0.46),
+        ),
     }
 }
 
@@ -413,6 +587,7 @@ fn foot_center(side: f32, pose: CharacterPose) -> Vec3 {
     match pose {
         CharacterPose::Idle => Vec3::new(0.22 * side, 0.12, 0.16),
         CharacterPose::Jumping => Vec3::new(0.30 * side, 0.52, 0.04),
+        CharacterPose::Dying => Vec3::new(0.50 * side, 0.30, -0.50),
     }
 }
 
@@ -559,6 +734,45 @@ mod tests {
         assert!(jumping_wrist.y > idle_wrist.y);
         assert!(jumping_ankle.y > idle_ankle.y);
         assert!(jumping_foot.y > idle_foot.y);
+    }
+
+    #[test]
+    fn death_motion_jumps_then_lands_on_its_back() {
+        let early = death_motion(0.10);
+        let apex = death_motion(PLAYER_DEATH_RISE_SECONDS);
+        let hang = death_motion(PLAYER_DEATH_RISE_SECONDS + PLAYER_DEATH_HANG_SECONDS * 0.5);
+        let finish = death_motion(PLAYER_DEATH_DURATION_SECONDS);
+
+        assert!(apex.lift > early.lift);
+        assert!((hang.lift - apex.lift).abs() < 0.0001);
+        assert!(finish.lift < 0.001);
+        assert!(finish.fall_angle > 1.3);
+    }
+
+    #[test]
+    fn death_motion_continues_below_the_ground_after_landing() {
+        let landed = death_motion(PLAYER_DEATH_DURATION_SECONDS);
+        let buried = death_motion(PLAYER_DEATH_ANIMATION_SECONDS);
+
+        assert!(buried.lift < landed.lift - 2.0);
+        assert!((buried.fall_angle - landed.fall_angle).abs() < 0.0001);
+    }
+
+    #[test]
+    fn cliff_fall_accelerates_without_a_jump_or_tilt() {
+        let first_half = cliff_fall_offset(0.5);
+        let second_half = cliff_fall_offset(1.0) - first_half;
+
+        assert!(first_half < 0.0);
+        assert!(second_half < first_half);
+    }
+
+    #[test]
+    fn death_facing_uses_the_horizontal_camera_direction() {
+        let facing = death_facing(Vec3::new(5.0, 8.0, -2.0));
+
+        assert!(facing.y.abs() < 0.0001);
+        assert!(facing.x > 0.9 && facing.z < -0.3);
     }
 
     #[test]

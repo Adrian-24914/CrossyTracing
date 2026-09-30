@@ -21,7 +21,7 @@ mod window;
 mod world;
 
 use framebuffer::Framebuffer;
-use game::{Game, Move};
+use game::{DeathKind, Game, Move};
 use math::Vec3;
 use orbit_camera::{OrbitCamera, Projection};
 use renderer::RenderResources;
@@ -59,9 +59,9 @@ fn main() {
     let skybox = Skybox::load().expect("No se pudo cargar assets/skybox/runtime");
     let render_resources = RenderResources { skybox: &skybox };
     let ui_assets = ui::UiAssets::load();
-    let mut scene = scene::build_scene(&game);
-    let mut previous_frame = Instant::now();
     let mut phase = AppPhase::Intro { elapsed: 0.0 };
+    let mut scene = scene::build_scene_with_player(&game, player_animation(&game, &phase, &camera));
+    let mut previous_frame = Instant::now();
     let mut intro_background: Option<Vec<u32>>;
     let mut death_background: Option<Vec<u32>> = None;
 
@@ -91,8 +91,8 @@ fn main() {
         let mut death_fade = None;
         if reset {
             game.reset();
-            scene = scene::build_scene(&game);
             phase = AppPhase::Intro { elapsed: 0.0 };
+            scene = scene::build_scene_with_player(&game, player_animation(&game, &phase, &camera));
             intro_background = None;
             death_background = None;
             changed = true;
@@ -146,14 +146,16 @@ fn main() {
                     }
                 }
                 AppPhase::Death { elapsed } => {
+                    let was_animating = *elapsed < player::PLAYER_DEATH_ANIMATION_SECONDS;
                     *elapsed += delta_seconds;
                     death_fade = Some((*elapsed / DEATH_FADE_SECONDS).clamp(0.0, 1.0));
+                    changed |= was_animating;
                 }
             }
         }
 
         if changed {
-            scene = scene::build_scene(&game);
+            scene = scene::build_scene_with_player(&game, player_animation(&game, &phase, &camera));
             renderer::render(
                 &mut framebuffer,
                 &camera,
@@ -192,6 +194,31 @@ fn main() {
 
 fn intro_rise_progress(elapsed: f32) -> f32 {
     ((elapsed - INTRO_HOLD_SECONDS) / INTRO_RISE_SECONDS).clamp(0.0, 1.0)
+}
+
+fn player_animation(
+    game: &Game,
+    phase: &AppPhase,
+    camera: &OrbitCamera,
+) -> player::PlayerAnimation {
+    match phase {
+        AppPhase::Death { elapsed } => player::PlayerAnimation::Dying {
+            elapsed: *elapsed,
+            camera_position: camera.eye,
+            kind: match game.death_kind() {
+                Some(DeathKind::FellOffWorld) => game
+                    .cliff_fall_position()
+                    .map(|(x, y, z)| player::DeathAnimationKind::CliffFall {
+                        origin: Vec3::new(x, y, z),
+                    })
+                    .unwrap_or(player::DeathAnimationKind::Standard),
+                Some(DeathKind::Hazard) | None => player::DeathAnimationKind::Standard,
+            },
+        },
+        AppPhase::Intro { .. } | AppPhase::Ready | AppPhase::Playing => {
+            player::PlayerAnimation::Alive
+        }
+    }
 }
 
 fn handle_ready_input(

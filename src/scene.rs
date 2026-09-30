@@ -6,7 +6,7 @@ use crate::{
     material::Material,
     math::Vec3,
     obstacle::ForestProp,
-    player::add_player,
+    player::{add_player, PlayerAnimation},
     sphere::Sphere,
     train::{add_train, train_center_x},
     world::{
@@ -22,7 +22,12 @@ pub struct Scene {
     pub forest_props: Vec<ForestProp>,
 }
 
+#[cfg(test)]
 pub fn build_scene(game: &Game) -> Scene {
+    build_scene_with_player(game, PlayerAnimation::Alive)
+}
+
+pub fn build_scene_with_player(game: &Game, player_animation: PlayerAnimation) -> Scene {
     let mut cubes = Vec::with_capacity(LANE_COUNT * (TILE_COLUMNS + 3));
     let mut spheres = Vec::new();
     let mut cylinders = Vec::new();
@@ -159,7 +164,7 @@ pub fn build_scene(game: &Game) -> Scene {
         cylinders,
         forest_props,
     };
-    add_player(&mut scene, game);
+    add_player(&mut scene, game, player_animation);
     scene
 }
 

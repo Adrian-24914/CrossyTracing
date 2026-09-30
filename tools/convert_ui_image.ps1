@@ -15,11 +15,14 @@ try {
     $scale = [Math]::Min($MaximumWidth / $sourceImage.Width, $MaximumHeight / $sourceImage.Height)
     $width = [Math]::Max(1, [Math]::Round($sourceImage.Width * $scale))
     $height = [Math]::Max(1, [Math]::Round($sourceImage.Height * $scale))
-    $runtimeImage = New-Object System.Drawing.Bitmap($width, $height, [System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
+    # El BMP de 32 bits conserva los bordes semitransparentes de los PNG.
+    # Antes se usaba magenta como chroma key, lo que destruia ese degradado.
+    $runtimeImage = New-Object System.Drawing.Bitmap($width, $height, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
     try {
         $graphics = [System.Drawing.Graphics]::FromImage($runtimeImage)
         try {
-            $graphics.Clear([System.Drawing.Color]::Magenta)
+            $graphics.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceCopy
+            $graphics.Clear([System.Drawing.Color]::Transparent)
             $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
             $graphics.DrawImage($sourceImage, 0, 0, $width, $height)
         }
