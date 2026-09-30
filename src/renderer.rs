@@ -225,7 +225,7 @@ fn shade_with_shadow(
     let diffuse = if shadowed {
         0.0
     } else {
-        hit.normal.dot(light_direction).max(0.0)
+        cell_shade_light(hit.normal.dot(light_direction).max(0.0))
     };
     let sky_visibility = (hit.normal.y * 0.5 + 0.5).clamp(0.0, 1.0);
     let ambient = AMBIENT_LIGHT + SKY_FILL_LIGHT * sky_visibility;
@@ -243,6 +243,15 @@ fn shade_with_shadow(
         .powf(material.shininess)
         * material.specular_strength;
     blend(Color::new(255, 255, 255), base, highlight)
+}
+
+fn cell_shade_light(diffuse: f32) -> f32 {
+    match diffuse {
+        value if value < 0.16 => 0.0,
+        value if value < 0.42 => 0.32,
+        value if value < 0.72 => 0.66,
+        _ => 1.0,
+    }
 }
 
 fn is_shadowed(
@@ -347,6 +356,14 @@ mod tests {
 
         assert!(color.r >= 45 && color.g >= 55 && color.b >= 35);
         assert!(color.r < 100 && color.g < 120 && color.b < 80);
+    }
+
+    #[test]
+    fn cell_shading_uses_four_distinct_light_bands() {
+        assert_eq!(cell_shade_light(0.0), 0.0);
+        assert_eq!(cell_shade_light(0.20), 0.32);
+        assert_eq!(cell_shade_light(0.60), 0.66);
+        assert_eq!(cell_shade_light(0.90), 1.0);
     }
 
     #[test]
