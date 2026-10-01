@@ -70,7 +70,6 @@ impl PerformanceStats {
             self.frame_ms * 0.82 + measured * 0.18
         };
     }
-
 }
 
 fn main() {
@@ -243,12 +242,13 @@ fn main() {
                 fade,
             );
         }
-        audio.sync_music(matches!(&phase, AppPhase::Playing), game.paused);
+        audio.sync_music(!matches!(&phase, AppPhase::Death { .. }), game.paused);
         if matches!(&phase, AppPhase::Playing) {
             for event in game.drain_sound_events() {
                 audio.play(event);
             }
         }
+        audio.update(delta_seconds);
         update_title(
             &window,
             &game,
