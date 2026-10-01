@@ -24,6 +24,8 @@ pub enum ForestObstacleKind {
 pub struct ForestObstacle {
     pub column: usize,
     pub kind: ForestObstacleKind,
+    /// Decidido al generar la fila para que el follaje no cambie mientras se mueve.
+    pub has_foliage: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -32,6 +34,13 @@ pub struct GrassBlade {
     pub local_z: f32,
     pub width: f32,
     pub height: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RiverFish {
+    pub column: usize,
+    /// Desfase fijo para que cada pez mantenga su propio ciclo al reciclar filas.
+    pub phase: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -95,6 +104,7 @@ pub struct Lane {
     pub grass_tone_shifts: Vec<u8>,
     pub grass_blades: Vec<Vec<GrassBlade>>,
     pub platform_columns: Vec<usize>,
+    pub fish: Vec<RiverFish>,
     pub railway: Option<RailwayState>,
 }
 

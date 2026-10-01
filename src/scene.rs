@@ -11,7 +11,7 @@ use crate::{
     train::{add_train, train_center_x},
     world::{
         Environment, ForestSectionKind, GrassBlade, LaneKind, RailwayPhase, RailwayState,
-        SectionKind,
+        RiverFish, SectionKind,
     },
 };
 
@@ -94,10 +94,11 @@ pub fn build_scene_with_player(game: &Game, player_animation: PlayerAnimation) -
         match lane.environment {
             Environment::Forest => {
                 for obstacle in &lane.obstacles {
-                    let prop = ForestProp::new(
+                    let prop = ForestProp::new_with_foliage(
                         obstacle.kind,
                         Vec3::new(column_x(obstacle.column), lane_y + 0.14, lane_z),
                         obstacle_color,
+                        obstacle.has_foliage,
                     );
                     debug_assert!(prop.foliage_anchors().is_none_or(|anchors| {
                         anchors
@@ -118,6 +119,7 @@ pub fn build_scene_with_player(game: &Game, player_animation: PlayerAnimation) -
                         Material::matte(Color::new(137, 84, 48)),
                     ));
                 }
+                add_river_fish(&mut cubes, &lane.fish, lane_y, lane_z, game.animation_time);
             }
             Environment::Railway => {
                 for column in 0..TILE_COLUMNS {
@@ -194,9 +196,54 @@ fn add_river_surfaces(cubes: &mut Vec<Cube>, game: &Game) {
                 1.38,
                 end_z - start_z + TILE_SPACING - 0.02,
             ),
-            Material::translucent_matte(Color::new(52, 129, 164), 0.42),
+            Material::refractive(Color::new(52, 129, 164), 0.42, 1.333),
         ));
         start = end + 1;
+    }
+}
+
+fn add_river_fish(
+    cubes: &mut Vec<Cube>,
+    fish: &[RiverFish],
+    lane_y: f32,
+    lane_z: f32,
+    animation_time: f32,
+) {
+    for fish in fish {
+        let cycle = (animation_time * 0.20 + fish.phase).rem_euclid(1.0);
+        let (swim_offset, facing, jumping) = if cycle < 0.76 {
+            // La vuelta termina exactamente donde comienza el salto: el loop no corta.
+            let angle = cycle / 0.76 * std::f32::consts::TAU;
+            (
+                Vec3::new(angle.cos() * 0.24, 0.0, angle.sin() * 0.24),
+                Vec3::new(-angle.sin(), 0.0, angle.cos()),
+                0.0,
+            )
+        } else {
+            let progress = (cycle - 0.76) / 0.24;
+            (
+                Vec3::new(0.24, 0.0, 0.0),
+                Vec3::new(0.0, 0.0, 1.0),
+                0.54 * 4.0 * progress * (1.0 - progress),
+            )
+        };
+        let center = Vec3::new(
+            column_x(fish.column) + swim_offset.x,
+            lane_y - 0.35 + jumping,
+            lane_z + swim_offset.z,
+        );
+        let material = Material::glossy(Color::new(231, 132, 49), 0.20, 18.0);
+        // El cuerpo es un cubo; la cola sigue de forma continua el vector tangente.
+        cubes.push(Cube::with_material(
+            center,
+            Vec3::new(0.30, 0.20, 0.30),
+            material,
+        ));
+        cubes.push(Cube::with_material(
+            center - facing * 0.20,
+            Vec3::new(0.15, 0.12, 0.15),
+            material,
+        ));
     }
 }
 

@@ -233,7 +233,7 @@ fn tilt_character_back(
     }
     for cylinder in &mut scene.cylinders[cylinder_start..] {
         cylinder.center = rotate_back(cylinder.center - anchor, facing, angle) + anchor;
-        cylinder.axis = rotate_back(cylinder.axis, facing, angle).normalize();
+        cylinder.rotate_orientation(|direction| rotate_back(direction, facing, angle));
     }
 }
 
