@@ -2,10 +2,10 @@ use crate::{
     color::Color,
     cube::Cube,
     cylinder::Cylinder,
+    leaf_cube::LeafCube,
     material::Material,
     math::Vec3,
     ray::{Hit, Ray},
-    sphere::Sphere,
     tree::{FoliageAnchor, Tree},
     world::ForestObstacleKind,
 };
@@ -18,12 +18,24 @@ pub enum ForestProp {
 }
 
 impl ForestProp {
+    #[cfg(test)]
     pub fn new(kind: ForestObstacleKind, base: Vec3, wood_color: Color) -> Self {
+        Self::new_with_foliage(kind, base, wood_color, true)
+    }
+
+    pub fn new_with_foliage(
+        kind: ForestObstacleKind,
+        base: Vec3,
+        wood_color: Color,
+        has_foliage: bool,
+    ) -> Self {
         match kind {
-            ForestObstacleKind::Tree => Self::Tree(Tree::new(base, wood_color)),
+            ForestObstacleKind::Tree => {
+                Self::Tree(Tree::with_foliage(base, wood_color, has_foliage))
+            }
             ForestObstacleKind::Rock => Self::Rock(rock(base)),
             ForestObstacleKind::FallenLog => Self::FallenLog(fallen_log(base, wood_color)),
-            ForestObstacleKind::Bush => Self::Bush(bush(base)),
+            ForestObstacleKind::Bush => Self::Bush(bush(base, wood_color)),
         }
     }
 
@@ -34,17 +46,35 @@ impl ForestProp {
         }
     }
 
+    pub fn intersect_shadow(&self, ray: &Ray) -> bool {
+        match self {
+            Self::Tree(tree) => tree.intersect_shadow(ray).is_some(),
+            Self::Rock(model) | Self::FallenLog(model) | Self::Bush(model) => {
+                model.intersect_shadow(ray)
+            }
+        }
+    }
+
     pub fn foliage_anchors(&self) -> Option<&[FoliageAnchor; 5]> {
         match self {
             Self::Tree(tree) => Some(tree.foliage_anchors()),
             Self::Rock(_) | Self::FallenLog(_) | Self::Bush(_) => None,
         }
     }
+
+    pub(crate) fn bounds(&self) -> (Vec3, f32) {
+        match self {
+            Self::Tree(tree) => tree.bounds(),
+            Self::Rock(model) | Self::FallenLog(model) | Self::Bush(model) => {
+                (model.bounds_center, model.bounds_radius)
+            }
+        }
+    }
 }
 
 pub(crate) struct CompoundObstacle {
     cubes: Vec<Cube>,
-    spheres: Vec<Sphere>,
+    leaves: Vec<LeafCube>,
     cylinders: Vec<Cylinder>,
     bounds_center: Vec3,
     bounds_radius: f32,
@@ -60,13 +90,27 @@ impl CompoundObstacle {
         for cube in &self.cubes {
             keep_closest(&mut closest, cube.intersect(ray), cube.material);
         }
-        for sphere in &self.spheres {
-            keep_closest(&mut closest, sphere.intersect(ray), sphere.material);
+        for leaf in &self.leaves {
+            keep_closest(&mut closest, leaf.intersect(ray), leaf.material);
         }
         for cylinder in &self.cylinders {
             keep_closest(&mut closest, cylinder.intersect(ray), cylinder.material);
         }
         closest
+    }
+
+    fn intersect_shadow(&self, ray: &Ray) -> bool {
+        if ray_misses_sphere(ray, self.bounds_center, self.bounds_radius) {
+            return false;
+        }
+        // Igual que la copa de los árboles, las hojas del arbusto son parte
+        // visual: el tronco conserva la sombra sin multiplicar los rayos de
+        // sombra por los cinco cubos de follaje.
+        self.cubes.iter().any(|cube| cube.intersect(ray).is_some())
+            || self
+                .cylinders
+                .iter()
+                .any(|cylinder| cylinder.intersect(ray).is_some())
     }
 }
 
@@ -103,7 +147,7 @@ fn rock(base: Vec3) -> CompoundObstacle {
     ];
     CompoundObstacle {
         cubes,
-        spheres: Vec::new(),
+        leaves: Vec::new(),
         cylinders: Vec::new(),
         bounds_center: base + Vec3::new(0.0, 0.28, 0.0),
         bounds_radius: 0.68,
@@ -131,7 +175,7 @@ fn fallen_log(base: Vec3, color: Color) -> CompoundObstacle {
     ];
     CompoundObstacle {
         cubes: Vec::new(),
-        spheres: Vec::new(),
+        leaves: Vec::new(),
         cylinders,
         bounds_center: base + Vec3::new(0.0, 0.30, 0.0),
         bounds_radius: 0.78,
@@ -142,36 +186,50 @@ fn wood_material(color: Color) -> Material {
     Material::matte(color)
 }
 
-fn bush(base: Vec3) -> CompoundObstacle {
+fn bush(base: Vec3, wood_color: Color) -> CompoundObstacle {
     let green = Color::new(57, 132, 70);
     let light = shade(green, 17);
     let dark = shade(green, -14);
+    // Cinco cubos solapados alrededor del tronco: conservan la silueta de
+    // nube del arbusto anterior, sin abrir huecos entre sus hojas.
     let centers = [
-        base + Vec3::new(0.0, 0.34, 0.0),
-        base + Vec3::new(-0.29, 0.23, 0.05),
-        base + Vec3::new(0.27, 0.29, 0.07),
-        base + Vec3::new(-0.08, 0.19, -0.26),
-        base + Vec3::new(0.09, 0.50, 0.14),
+        base + Vec3::new(0.0, 0.62, 0.0),
+        base + Vec3::new(-0.17, 0.57, 0.04),
+        base + Vec3::new(0.18, 0.59, 0.05),
+        base + Vec3::new(-0.05, 0.54, -0.16),
+        base + Vec3::new(0.04, 0.75, 0.09),
     ];
-    let spheres = vec![
-        Sphere::new(centers[0], 0.68, green),
-        Sphere::new(centers[1], 0.40, dark),
-        Sphere::new(centers[2], 0.54, green),
-        Sphere::new(centers[3], 0.32, dark),
-        Sphere::new(centers[4], 0.46, light),
+    let leaves = vec![
+        bush_leaf(centers[0], 0.42, 0.18, 0.31, 0.42, green),
+        bush_leaf(centers[1], 0.30, 1.07, 0.22, 0.58, dark),
+        bush_leaf(centers[2], 0.34, 2.16, 0.37, 0.29, green),
+        bush_leaf(centers[3], 0.27, 3.38, 0.26, 0.66, dark),
+        bush_leaf(centers[4], 0.31, 4.71, 0.34, 0.47, light),
     ];
-    let joint = base + Vec3::new(0.0, 0.14, 0.0);
-    let cylinders = centers[1..]
-        .iter()
-        .map(|center| Cylinder::new_between(joint, *center, 0.09, dark))
-        .collect();
+    let cylinders = vec![Cylinder::new_between_with_material(
+        base + Vec3::new(0.0, 0.02, 0.0),
+        base + Vec3::new(0.0, 0.60, 0.0),
+        0.16,
+        wood_material(shade(wood_color, -8)),
+    )];
     CompoundObstacle {
         cubes: Vec::new(),
-        spheres,
+        leaves,
         cylinders,
-        bounds_center: base + Vec3::new(0.0, 0.35, 0.0),
-        bounds_radius: 0.74,
+        bounds_center: base + Vec3::new(0.0, 0.61, 0.0),
+        bounds_radius: 0.70,
     }
+}
+
+fn bush_leaf(center: Vec3, size: f32, yaw: f32, tilt: f32, roll: f32, color: Color) -> LeafCube {
+    LeafCube::new(
+        center,
+        Vec3::new(size, size, size),
+        yaw,
+        tilt,
+        roll,
+        Material::matte(color),
+    )
 }
 
 fn keep_closest(closest: &mut Option<(Hit, Material)>, candidate: Option<Hit>, material: Material) {
@@ -217,7 +275,7 @@ mod tests {
             .cubes
             .iter()
             .all(|cube| cube.material.finish == crate::material::Finish::Matte));
-        assert!(model.spheres.is_empty());
+        assert!(model.leaves.is_empty());
         assert!(model.cylinders.is_empty());
     }
 
@@ -231,6 +289,7 @@ mod tests {
             panic!("se esperaba un tronco");
         };
         assert_eq!(model.cylinders.len(), 2);
+        assert!(model.leaves.is_empty());
         assert!(model
             .cylinders
             .iter()
@@ -238,7 +297,7 @@ mod tests {
     }
 
     #[test]
-    fn bush_connects_its_five_spheres_with_cylinders() {
+    fn bush_uses_five_leaf_cubes_and_one_hexagonal_trunk() {
         let ForestProp::Bush(model) = ForestProp::new(
             ForestObstacleKind::Bush,
             Vec3::default(),
@@ -246,18 +305,12 @@ mod tests {
         ) else {
             panic!("se esperaba un arbusto");
         };
-        assert_eq!(model.spheres.len(), 5);
-        assert_eq!(model.cylinders.len(), 4);
-        let smallest = model
-            .spheres
+        assert!(model.cubes.is_empty());
+        assert_eq!(model.leaves.len(), 5);
+        assert_eq!(model.cylinders.len(), 1);
+        assert!(model
+            .leaves
             .iter()
-            .map(|sphere| sphere.radius)
-            .fold(f32::INFINITY, f32::min);
-        let largest = model
-            .spheres
-            .iter()
-            .map(|sphere| sphere.radius)
-            .fold(0.0_f32, f32::max);
-        assert!(largest - smallest > 0.15);
+            .all(|leaf| leaf.material.finish == crate::material::Finish::Matte));
     }
 }

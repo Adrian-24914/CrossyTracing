@@ -11,6 +11,7 @@ pub struct Cylinder {
     pub half_length: f32,
     pub radius: f32,
     pub material: Material,
+    side_normals: [Vec3; 3],
 }
 
 impl Cylinder {
@@ -20,12 +21,14 @@ impl Cylinder {
         diameter: f32,
         material: Material,
     ) -> Self {
+        let axis = Vec3::new(1.0, 0.0, 0.0);
         Self {
             center,
-            axis: Vec3::new(1.0, 0.0, 0.0),
+            axis,
             half_length: length * 0.5,
             radius: diameter * 0.5,
             material,
+            side_normals: hexagon_side_normals(axis),
         }
     }
 
@@ -53,6 +56,14 @@ impl Cylinder {
             half_length: length * 0.5,
             radius: diameter * 0.5,
             material,
+            side_normals: hexagon_side_normals(axis),
+        }
+    }
+
+    pub fn rotate_orientation(&mut self, mut rotate: impl FnMut(Vec3) -> Vec3) {
+        self.axis = rotate(self.axis).normalize();
+        for normal in &mut self.side_normals {
+            *normal = rotate(*normal).normalize();
         }
     }
 
@@ -67,63 +78,113 @@ impl Cylinder {
             return None;
         }
 
-        let mut closest = self.intersect_side(ray, offset);
-        let ray_axis = ray.direction.dot(self.axis);
-        let offset_axis = offset.dot(self.axis);
+        let mut entry = f32::NEG_INFINITY;
+        let mut exit = f32::INFINITY;
+        let mut entry_normal = self.axis;
+        let mut exit_normal = self.axis;
 
-        if ray_axis.abs() > 0.000_001 {
-            for cap in [-self.half_length, self.half_length] {
-                let distance = (cap - offset_axis) / ray_axis;
-                if distance <= 0.001 || closest.as_ref().is_some_and(|hit| distance >= hit.distance)
-                {
-                    continue;
-                }
-                let point = offset + ray.direction * distance;
-                let radial = point - self.axis * cap;
-                if radial.dot(radial) <= self.radius * self.radius {
-                    let cap_sign = cap.signum();
-                    closest = Some(Hit {
-                        distance,
-                        normal: self.axis * cap_sign,
-                    });
-                }
-            }
-        }
-
-        closest
-    }
-
-    fn intersect_side(&self, ray: &Ray, offset: Vec3) -> Option<Hit> {
-        let ray_axis = ray.direction.dot(self.axis);
-        let offset_axis = offset.dot(self.axis);
-        let radial_direction = ray.direction - self.axis * ray_axis;
-        let radial_offset = offset - self.axis * offset_axis;
-        let a = radial_direction.dot(radial_direction);
-        if a < 0.000_001 {
-            return None;
-        }
-        let half_b = radial_offset.dot(radial_direction);
-        let c = radial_offset.dot(radial_offset) - self.radius * self.radius;
-        let discriminant = half_b * half_b - a * c;
-        if discriminant < 0.0 {
+        if !clip_slab(
+            offset,
+            ray.direction,
+            self.axis,
+            self.half_length,
+            &mut entry,
+            &mut exit,
+            &mut entry_normal,
+            &mut exit_normal,
+        ) {
             return None;
         }
 
-        let square_root = discriminant.sqrt();
-        for distance in [(-half_b - square_root) / a, (-half_b + square_root) / a] {
-            if distance <= 0.001 {
-                continue;
-            }
-            let axial_distance = offset_axis + ray_axis * distance;
-            if axial_distance.abs() <= self.half_length {
-                let point = offset + ray.direction * distance;
-                let radial = point - self.axis * axial_distance;
-                let normal = radial * (1.0 / self.radius);
-                return Some(Hit { distance, normal });
+        // El radio sigue siendo el radio exterior. La distancia a cada cara de
+        // un hexagono regular es radio * cos(30 grados).
+        let apothem = self.radius * 0.866_025_4;
+        for normal in self.side_normals {
+            if !clip_slab(
+                offset,
+                ray.direction,
+                normal,
+                apothem,
+                &mut entry,
+                &mut exit,
+                &mut entry_normal,
+                &mut exit_normal,
+            ) {
+                return None;
             }
         }
-        None
+
+        if entry > 0.001 {
+            Some(Hit {
+                distance: entry,
+                normal: entry_normal,
+            })
+        } else if exit > 0.001 {
+            Some(Hit {
+                distance: exit,
+                normal: exit_normal,
+            })
+        } else {
+            None
+        }
     }
+}
+
+fn hexagon_side_normals(axis: Vec3) -> [Vec3; 3] {
+    let reference = if axis.y.abs() < 0.999 {
+        Vec3::new(0.0, 1.0, 0.0)
+    } else {
+        Vec3::new(1.0, 0.0, 0.0)
+    };
+    let first = axis.cross(&reference).normalize();
+    let second = axis.cross(&first).normalize();
+    const COS_60: f32 = 0.5;
+    const SIN_60: f32 = 0.866_025_4;
+
+    [
+        first,
+        first * COS_60 + second * SIN_60,
+        first * -COS_60 + second * SIN_60,
+    ]
+}
+
+#[allow(clippy::too_many_arguments)]
+fn clip_slab(
+    offset: Vec3,
+    direction: Vec3,
+    normal: Vec3,
+    extent: f32,
+    entry: &mut f32,
+    exit: &mut f32,
+    entry_normal: &mut Vec3,
+    exit_normal: &mut Vec3,
+) -> bool {
+    let origin_distance = offset.dot(normal);
+    let direction_distance = direction.dot(normal);
+
+    if direction_distance.abs() < 0.000_001 {
+        return origin_distance.abs() <= extent;
+    }
+
+    let mut near = (-extent - origin_distance) / direction_distance;
+    let mut far = (extent - origin_distance) / direction_distance;
+    let mut near_normal = normal * -1.0;
+    let mut far_normal = normal;
+    if near > far {
+        std::mem::swap(&mut near, &mut far);
+        std::mem::swap(&mut near_normal, &mut far_normal);
+    }
+
+    if near > *entry {
+        *entry = near;
+        *entry_normal = near_normal;
+    }
+    if far < *exit {
+        *exit = far;
+        *exit_normal = far_normal;
+    }
+
+    *entry <= *exit
 }
 
 #[cfg(test)]
@@ -140,11 +201,17 @@ mod tests {
     }
 
     #[test]
-    fn ray_hits_the_round_side() {
+    fn ray_hits_a_flat_hexagonal_side() {
         let ray = Ray::new(Vec3::new(0.0, 0.0, 3.0), Vec3::new(0.0, 0.0, -1.0));
         let hit = test_cylinder().intersect(&ray).unwrap();
-        assert!((hit.distance - 2.0).abs() < 0.0001);
+        assert!((hit.distance - (3.0 - 0.866_025_4)).abs() < 0.0001);
         assert!((hit.normal.z - 1.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn ray_outside_a_hexagonal_corner_misses() {
+        let ray = Ray::new(Vec3::new(3.0, 0.8, 0.6), Vec3::new(-1.0, 0.0, 0.0));
+        assert!(test_cylinder().intersect(&ray).is_none());
     }
 
     #[test]
@@ -166,7 +233,7 @@ mod tests {
         let ray = Ray::new(Vec3::new(0.0, 0.0, 3.0), Vec3::new(0.0, 0.0, -1.0));
         let hit = cylinder.intersect(&ray).unwrap();
 
-        assert!((hit.distance - 2.0).abs() < 0.0001);
+        assert!((hit.distance - (3.0 - 0.866_025_4)).abs() < 0.0001);
         assert!((hit.normal.z - 1.0).abs() < 0.0001);
     }
 
