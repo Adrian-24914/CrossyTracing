@@ -26,8 +26,14 @@ impl Cube {
     }
 
     pub fn intersect(&self, ray: &Ray) -> Option<Hit> {
+        self.intersect_before(ray, f32::INFINITY)
+    }
+
+    /// Intersección acotada para el renderizador: si otra superficie ya está
+    /// delante, las caras restantes de este cubo no necesitan evaluarse.
+    pub fn intersect_before(&self, ray: &Ray, maximum_distance: f32) -> Option<Hit> {
         let mut near = 0.001;
-        let mut far = f32::INFINITY;
+        let mut far = maximum_distance;
         let mut normal = Vec3::default();
 
         if !intersect_axis(

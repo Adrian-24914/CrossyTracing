@@ -22,6 +22,189 @@ pub struct RenderResources<'a> {
     pub skybox: &'a Skybox,
 }
 
+#[derive(Clone, Copy)]
+enum SceneObject {
+    Cube(usize),
+    Sphere(usize),
+    Cylinder(usize),
+    ForestProp(usize),
+}
+
+#[derive(Clone, Copy)]
+struct Bounds {
+    min: Vec3,
+    max: Vec3,
+}
+
+impl Bounds {
+    fn around(center: Vec3, radius: f32) -> Self {
+        let extent = Vec3::new(radius, radius, radius);
+        Self {
+            min: center - extent,
+            max: center + extent,
+        }
+    }
+
+    fn union(self, other: Self) -> Self {
+        Self {
+            min: Vec3::new(
+                self.min.x.min(other.min.x),
+                self.min.y.min(other.min.y),
+                self.min.z.min(other.min.z),
+            ),
+            max: Vec3::new(
+                self.max.x.max(other.max.x),
+                self.max.y.max(other.max.y),
+                self.max.z.max(other.max.z),
+            ),
+        }
+    }
+
+    fn center(self) -> Vec3 {
+        (self.min + self.max) * 0.5
+    }
+}
+
+#[derive(Clone, Copy)]
+struct BoundedObject {
+    object: SceneObject,
+    bounds: Bounds,
+}
+
+struct BvhNode {
+    bounds: Bounds,
+    left: usize,
+    right: usize,
+    start: usize,
+    count: usize,
+}
+
+struct TraceScene<'a> {
+    cubes: &'a [Cube],
+    spheres: &'a [Sphere],
+    cylinders: &'a [Cylinder],
+    forest_props: &'a [ForestProp],
+    objects: Vec<BoundedObject>,
+    nodes: Vec<BvhNode>,
+    root: Option<usize>,
+}
+
+impl<'a> TraceScene<'a> {
+    fn new(
+        cubes: &'a [Cube],
+        spheres: &'a [Sphere],
+        cylinders: &'a [Cylinder],
+        forest_props: &'a [ForestProp],
+    ) -> Self {
+        let mut objects =
+            Vec::with_capacity(cubes.len() + spheres.len() + cylinders.len() + forest_props.len());
+        objects.extend(cubes.iter().enumerate().map(|(index, cube)| BoundedObject {
+            object: SceneObject::Cube(index),
+            bounds: Bounds {
+                min: cube.min,
+                max: cube.max,
+            },
+        }));
+        objects.extend(
+            spheres
+                .iter()
+                .enumerate()
+                .map(|(index, sphere)| BoundedObject {
+                    object: SceneObject::Sphere(index),
+                    bounds: Bounds::around(sphere.center, sphere.radius),
+                }),
+        );
+        objects.extend(cylinders.iter().enumerate().map(|(index, cylinder)| {
+            let extent = Vec3::new(
+                cylinder.axis.x.abs() * cylinder.half_length + cylinder.radius,
+                cylinder.axis.y.abs() * cylinder.half_length + cylinder.radius,
+                cylinder.axis.z.abs() * cylinder.half_length + cylinder.radius,
+            );
+            BoundedObject {
+                object: SceneObject::Cylinder(index),
+                bounds: Bounds {
+                    min: cylinder.center - extent,
+                    max: cylinder.center + extent,
+                },
+            }
+        }));
+        objects.extend(forest_props.iter().enumerate().map(|(index, prop)| {
+            let (center, radius) = prop.bounds();
+            BoundedObject {
+                object: SceneObject::ForestProp(index),
+                bounds: Bounds::around(center, radius),
+            }
+        }));
+
+        let mut nodes = Vec::with_capacity(objects.len() * 2);
+        let root = (!objects.is_empty()).then(|| {
+            let object_count = objects.len();
+            build_bvh_node(&mut objects, &mut nodes, 0, object_count)
+        });
+        Self {
+            cubes,
+            spheres,
+            cylinders,
+            forest_props,
+            objects,
+            nodes,
+            root,
+        }
+    }
+}
+
+fn build_bvh_node(
+    objects: &mut [BoundedObject],
+    nodes: &mut Vec<BvhNode>,
+    start: usize,
+    end: usize,
+) -> usize {
+    let bounds = objects[start..end]
+        .iter()
+        .skip(1)
+        .fold(objects[start].bounds, |bounds, object| {
+            bounds.union(object.bounds)
+        });
+    let node_index = nodes.len();
+    nodes.push(BvhNode {
+        bounds,
+        left: usize::MAX,
+        right: usize::MAX,
+        start,
+        count: end - start,
+    });
+    if end - start <= 4 {
+        return node_index;
+    }
+
+    let extent = bounds.max - bounds.min;
+    let axis = if extent.x >= extent.y && extent.x >= extent.z {
+        0
+    } else if extent.y >= extent.z {
+        1
+    } else {
+        2
+    };
+    objects[start..end].sort_unstable_by(|left, right| {
+        axis_value(left.bounds.center(), axis).total_cmp(&axis_value(right.bounds.center(), axis))
+    });
+    let middle = start + (end - start) / 2;
+    let left = build_bvh_node(objects, nodes, start, middle);
+    let right = build_bvh_node(objects, nodes, middle, end);
+    nodes[node_index].left = left;
+    nodes[node_index].right = right;
+    nodes[node_index].count = 0;
+    node_index
+}
+
+fn axis_value(value: Vec3, axis: usize) -> f32 {
+    match axis {
+        0 => value.x,
+        1 => value.y,
+        _ => value.z,
+    }
+}
+
 pub fn render(
     framebuffer: &mut Framebuffer,
     camera: &OrbitCamera,
@@ -34,6 +217,8 @@ pub fn render(
     let light_direction = Vec3::new(-0.45, 0.85, 0.35).normalize();
     let width = framebuffer.width;
     let height = framebuffer.height;
+    let ray_grid = camera.ray_grid(width, height);
+    let trace_scene = TraceScene::new(cubes, spheres, cylinders, forest_props);
     let thread_count = thread::available_parallelism()
         .map(|count| count.get())
         .unwrap_or(1)
@@ -47,20 +232,14 @@ pub fn render(
             .enumerate()
         {
             let start_y = chunk_index * rows_per_thread;
+            let trace_scene = &trace_scene;
             scope.spawn(move || {
                 for (local_y, row) in pixels.chunks_mut(width).enumerate() {
                     let y = start_y + local_y;
-                    for (x, pixel) in row.iter_mut().enumerate() {
-                        let ray = camera.ray(x, y, width, height);
-                        let color = trace_primary(
-                            &ray,
-                            cubes,
-                            spheres,
-                            cylinders,
-                            forest_props,
-                            light_direction,
-                            resources,
-                        );
+                    let mut rays = ray_grid.row(y);
+                    for pixel in row {
+                        let ray = rays.next();
+                        let color = trace_primary(&ray, trace_scene, light_direction, resources);
                         *pixel = color.to_hex();
                     }
                 }
@@ -71,103 +250,168 @@ pub fn render(
 
 fn closest_hit(
     ray: &Ray,
-    cubes: &[Cube],
-    spheres: &[Sphere],
-    cylinders: &[Cylinder],
-    forest_props: &[ForestProp],
+    scene: &TraceScene<'_>,
     minimum_distance: f32,
 ) -> Option<(Hit, Material)> {
+    closest_hit_filtered(ray, scene, minimum_distance, false)
+}
+
+fn closest_hit_filtered(
+    ray: &Ray,
+    scene: &TraceScene<'_>,
+    minimum_distance: f32,
+    opaque_only: bool,
+) -> Option<(Hit, Material)> {
     let mut closest: Option<(Hit, Material)> = None;
-    for cube in cubes {
-        let Some(hit) = cube.intersect(ray) else {
-            continue;
-        };
-        if hit.distance <= minimum_distance {
-            continue;
-        }
-        if closest
+    let Some(root) = scene.root else {
+        return None;
+    };
+    let mut stack = [0_usize; 64];
+    let mut stack_length = 1;
+    stack[0] = root;
+
+    while stack_length > 0 {
+        stack_length -= 1;
+        let node = &scene.nodes[stack[stack_length]];
+        let maximum_distance = closest
             .as_ref()
-            .is_none_or(|(current, _)| hit.distance < current.distance)
-        {
-            closest = Some((hit, cube.material));
-        }
-    }
-    for sphere in spheres {
-        let Some(hit) = sphere.intersect(ray) else {
-            continue;
-        };
-        if hit.distance <= minimum_distance {
+            .map(|(hit, _)| hit.distance)
+            .unwrap_or(f32::INFINITY);
+        if ray_bounds_near(ray, node.bounds, maximum_distance).is_none() {
             continue;
         }
-        if closest
-            .as_ref()
-            .is_none_or(|(current, _)| hit.distance < current.distance)
-        {
-            closest = Some((hit, sphere.material));
-        }
-    }
-    for cylinder in cylinders {
-        let Some(hit) = cylinder.intersect(ray) else {
-            continue;
-        };
-        if hit.distance <= minimum_distance {
-            continue;
-        }
-        if closest
-            .as_ref()
-            .is_none_or(|(current, _)| hit.distance < current.distance)
-        {
-            closest = Some((hit, cylinder.material));
-        }
-    }
-    for prop in forest_props {
-        let Some((hit, material)) = prop.intersect(ray) else {
-            continue;
-        };
-        if hit.distance <= minimum_distance {
+
+        if node.count > 0 {
+            for bounded in &scene.objects[node.start..node.start + node.count] {
+                let Some((hit, material)) =
+                    intersect_object(ray, scene, bounded.object, opaque_only)
+                else {
+                    continue;
+                };
+                if hit.distance > minimum_distance
+                    && closest
+                        .as_ref()
+                        .is_none_or(|(current, _)| hit.distance < current.distance)
+                {
+                    closest = Some((hit, material));
+                }
+            }
             continue;
         }
-        if closest
-            .as_ref()
-            .is_none_or(|(current, _)| hit.distance < current.distance)
-        {
-            closest = Some((hit, material));
+
+        let left = &scene.nodes[node.left];
+        let right = &scene.nodes[node.right];
+        let left_near = ray_bounds_near(ray, left.bounds, maximum_distance);
+        let right_near = ray_bounds_near(ray, right.bounds, maximum_distance);
+        match (left_near, right_near) {
+            (Some(left_distance), Some(right_distance)) => {
+                let (near, far) = if left_distance <= right_distance {
+                    (node.left, node.right)
+                } else {
+                    (node.right, node.left)
+                };
+                stack[stack_length] = far;
+                stack[stack_length + 1] = near;
+                stack_length += 2;
+            }
+            (Some(_), None) => {
+                stack[stack_length] = node.left;
+                stack_length += 1;
+            }
+            (None, Some(_)) => {
+                stack[stack_length] = node.right;
+                stack_length += 1;
+            }
+            (None, None) => {}
         }
     }
     closest
 }
 
+fn intersect_object(
+    ray: &Ray,
+    scene: &TraceScene<'_>,
+    object: SceneObject,
+    opaque_only: bool,
+) -> Option<(Hit, Material)> {
+    let (hit, material) = match object {
+        SceneObject::Cube(index) => {
+            let object = &scene.cubes[index];
+            (object.intersect(ray)?, object.material)
+        }
+        SceneObject::Sphere(index) => {
+            let object = &scene.spheres[index];
+            (object.intersect(ray)?, object.material)
+        }
+        SceneObject::Cylinder(index) => {
+            let object = &scene.cylinders[index];
+            (object.intersect(ray)?, object.material)
+        }
+        SceneObject::ForestProp(index) => scene.forest_props[index].intersect(ray)?,
+    };
+    (!opaque_only || material.transparency <= 0.0).then_some((hit, material))
+}
+
+fn ray_bounds_near(ray: &Ray, bounds: Bounds, maximum_distance: f32) -> Option<f32> {
+    let mut near: f32 = 0.001;
+    let mut far = maximum_distance;
+    for (origin, direction, minimum, maximum) in [
+        (ray.origin.x, ray.direction.x, bounds.min.x, bounds.max.x),
+        (ray.origin.y, ray.direction.y, bounds.min.y, bounds.max.y),
+        (ray.origin.z, ray.direction.z, bounds.min.z, bounds.max.z),
+    ] {
+        if direction.abs() < 0.000_001 {
+            if origin < minimum || origin > maximum {
+                return None;
+            }
+            continue;
+        }
+        let inverse = 1.0 / direction;
+        let first = (minimum - origin) * inverse;
+        let second = (maximum - origin) * inverse;
+        near = near.max(first.min(second));
+        far = far.min(first.max(second));
+        if near > far {
+            return None;
+        }
+    }
+    Some(near)
+}
+
 fn trace_primary(
     ray: &Ray,
-    cubes: &[Cube],
-    spheres: &[Sphere],
-    cylinders: &[Cylinder],
-    forest_props: &[ForestProp],
+    scene: &TraceScene<'_>,
     light_direction: Vec3,
     resources: RenderResources<'_>,
 ) -> Color {
-    let Some((hit, material)) = closest_hit(ray, cubes, spheres, cylinders, forest_props, 0.001)
-    else {
+    let Some((hit, material)) = closest_hit(ray, scene, 0.001) else {
         return resources.skybox.sample(ray.direction);
     };
     let hit_point = ray.origin + ray.direction * hit.distance;
     let shadowed = material.finish != Finish::Unlit
+        && material.transparency <= 0.0
+        // La sombra proyectada se aprecia sobre las superficies horizontales
+        // del diorama. Evitar caras laterales ahorra rayos secundarios sin
+        // perder la lectura visual de árboles, troncos y obstáculos.
+        && hit.normal.y > 0.90
         && hit.normal.dot(light_direction) > 0.0
-        && is_shadowed(hit_point, hit.normal, light_direction, forest_props);
+        && is_shadowed(
+            hit_point,
+            hit.normal,
+            light_direction,
+            scene.forest_props,
+        );
     let mut surface = shade_with_shadow(ray, hit, material, light_direction, shadowed);
     if material.transparency > 0.0 {
-        let behind = closest_hit(
-            ray,
-            cubes,
-            spheres,
-            cylinders,
-            forest_props,
-            hit.distance + 0.001,
-        )
-        .map(|(behind_hit, behind_material)| {
-            shade(ray, behind_hit, behind_material, light_direction)
-        })
-        .unwrap_or_else(|| resources.skybox.sample(ray.direction));
+        let behind = if material.refraction_index > 1.0 {
+            refracted_color(ray, hit, material, scene, light_direction, resources)
+        } else {
+            closest_hit(ray, scene, hit.distance + 0.001)
+                .map(|(behind_hit, behind_material)| {
+                    shade(ray, behind_hit, behind_material, light_direction)
+                })
+                .unwrap_or_else(|| resources.skybox.sample(ray.direction))
+        };
         surface = blend(surface, behind, 1.0 - material.transparency);
     }
 
@@ -175,27 +419,65 @@ fn trace_primary(
         let reflected_direction =
             (ray.direction - hit.normal * (2.0 * ray.direction.dot(hit.normal))).normalize();
         let reflected_ray = Ray::new(hit_point + hit.normal * 0.002, reflected_direction);
-        let reflected = closest_hit(
-            &reflected_ray,
-            cubes,
-            spheres,
-            cylinders,
-            forest_props,
-            0.001,
-        )
-        .map(|(reflected_hit, reflected_material)| {
-            shade(
-                &reflected_ray,
-                reflected_hit,
-                reflected_material,
-                light_direction,
-            )
-        })
-        .unwrap_or_else(|| resources.skybox.sample(reflected_direction));
+        let reflected = closest_hit(&reflected_ray, scene, 0.001)
+            .map(|(reflected_hit, reflected_material)| {
+                shade(
+                    &reflected_ray,
+                    reflected_hit,
+                    reflected_material,
+                    light_direction,
+                )
+            })
+            .unwrap_or_else(|| resources.skybox.sample(reflected_direction));
         surface = blend(reflected, surface, material.reflectivity);
     }
 
     surface
+}
+
+fn refracted_color(
+    ray: &Ray,
+    hit: Hit,
+    material: Material,
+    scene: &TraceScene<'_>,
+    light_direction: Vec3,
+    resources: RenderResources<'_>,
+) -> Color {
+    let hit_point = ray.origin + ray.direction * hit.distance;
+    let Some(direction) = refract(ray.direction, hit.normal, material.refraction_index) else {
+        return resources.skybox.sample(ray.direction);
+    };
+    let refracted_ray = Ray::new(hit_point + direction * 0.002, direction);
+    // El agua ya es una superficie visual delgada. Buscar directamente el
+    // primer objeto opaco conserva la desviacion de Snell y evita volver a
+    // recorrer la misma interfaz dos veces por pixel.
+    closest_hit_filtered(&refracted_ray, scene, 0.001, true)
+        .map(|(behind_hit, behind_material)| {
+            shade(&refracted_ray, behind_hit, behind_material, light_direction)
+        })
+        .unwrap_or_else(|| resources.skybox.sample(direction))
+}
+
+/// Snell: desvía el rayo al entrar o salir de un material transparente.
+fn refract(direction: Vec3, normal: Vec3, material_index: f32) -> Option<Vec3> {
+    let mut interface_normal = normal;
+    let (from_index, to_index) = if direction.dot(normal) < 0.0 {
+        (1.0, material_index)
+    } else {
+        interface_normal = normal * -1.0;
+        (material_index, 1.0)
+    };
+    let ratio = from_index / to_index;
+    let cosine = (-direction.dot(interface_normal)).clamp(0.0, 1.0);
+    let perpendicular_squared = ratio * ratio * (1.0 - cosine * cosine);
+    if perpendicular_squared > 1.0 {
+        return None;
+    }
+    Some(
+        (direction * ratio
+            + interface_normal * (ratio * cosine - (1.0 - perpendicular_squared).sqrt()))
+        .normalize(),
+    )
 }
 
 fn shade(ray: &Ray, hit: Hit, material: Material, light_direction: Vec3) -> Color {
@@ -254,7 +536,7 @@ fn is_shadowed(
     let shadow_ray = Ray::new(hit_point + normal * 0.002, light_direction);
     forest_props
         .iter()
-        .any(|prop| prop.intersect(&shadow_ray).is_some())
+        .any(|prop| prop.intersect_shadow(&shadow_ray))
 }
 
 fn blend(front: Color, behind: Color, opacity: f32) -> Color {
@@ -271,7 +553,10 @@ fn blend(front: Color, behind: Color, opacity: f32) -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::f32::consts::FRAC_PI_4;
+    use std::{
+        f32::consts::FRAC_PI_4,
+        time::{Duration, Instant},
+    };
 
     #[test]
     fn cube_changes_pixels_in_front_of_the_camera() {
@@ -402,18 +687,20 @@ mod tests {
         ];
         let skybox = Skybox::solid(Color::new(50, 80, 120));
         let resources = RenderResources { skybox: &skybox };
+        let scene = TraceScene::new(&cubes, &[], &[], &[]);
 
-        let color = trace_primary(
-            &ray,
-            &cubes,
-            &[],
-            &[],
-            &[],
-            Vec3::new(0.0, 0.0, 1.0),
-            resources,
-        );
+        let color = trace_primary(&ray, &scene, Vec3::new(0.0, 0.0, 1.0), resources);
 
         assert_eq!(color.to_hex(), 0x7F007F);
+    }
+
+    #[test]
+    fn water_refraction_bends_a_ray_toward_the_surface_normal() {
+        let incoming = Vec3::new(0.6, -0.8, 0.0);
+        let refracted = refract(incoming, Vec3::new(0.0, 1.0, 0.0), 1.333).unwrap();
+
+        assert!(refracted.x.abs() < incoming.x.abs());
+        assert!(refracted.y < incoming.y);
     }
 
     #[test]
@@ -426,19 +713,113 @@ mod tests {
         )];
         let skybox = Skybox::solid(Color::new(100, 135, 190));
         let resources = RenderResources { skybox: &skybox };
+        let scene = TraceScene::new(&cubes, &[], &[], &[]);
 
-        let color = trace_primary(
-            &ray,
-            &cubes,
-            &[],
-            &[],
-            &[],
-            Vec3::new(0.0, 1.0, 0.0),
-            resources,
-        );
+        let color = trace_primary(&ray, &scene, Vec3::new(0.0, 1.0, 0.0), resources);
 
         assert!(color.r < 200);
         assert!(color.g > 0);
         assert!(color.b > 0);
+    }
+
+    #[test]
+    #[ignore = "medición manual de rendimiento a la resolución interna"]
+    fn measures_quality_render_buffer_options() {
+        let game = crate::game::Game::new();
+        let scene = crate::scene::build_scene(&game);
+        let camera = OrbitCamera::new(Vec3::new(8.5, 8.5, 11.5), Vec3::default(), FRAC_PI_4);
+        let skybox = Skybox::solid(Color::new(120, 170, 220));
+        let resources = RenderResources { skybox: &skybox };
+        for (width, height) in [(640, 480), (720, 540), (800, 600)] {
+            let mut framebuffer = Framebuffer::new(width, height);
+            let mut diorama_effect = crate::ui::DioramaEffect::new(width, height);
+
+            // El primer frame estabiliza los hilos y las cachés; los siguientes
+            // tres son los que se promedian para comparar optimizaciones.
+            render(
+                &mut framebuffer,
+                &camera,
+                &scene.cubes,
+                &scene.spheres,
+                &scene.cylinders,
+                &scene.forest_props,
+                resources,
+            );
+            diorama_effect.apply(&mut framebuffer.color);
+            let started = Instant::now();
+            for _ in 0..3 {
+                render(
+                    &mut framebuffer,
+                    &camera,
+                    &scene.cubes,
+                    &scene.spheres,
+                    &scene.cylinders,
+                    &scene.forest_props,
+                    resources,
+                );
+                diorama_effect.apply(&mut framebuffer.color);
+            }
+            let average = started.elapsed() / 3;
+            println!(
+                "buffer {width}x{height}: {:.1} ms ({:.1} FPS)",
+                average.as_secs_f32() * 1_000.0,
+                1.0 / average.as_secs_f32()
+            );
+            assert!(average < Duration::from_secs(1));
+        }
+
+        for (label, cubes, spheres, cylinders, forest_props) in [
+            (
+                "completa",
+                scene.cubes.as_slice(),
+                scene.spheres.as_slice(),
+                scene.cylinders.as_slice(),
+                scene.forest_props.as_slice(),
+            ),
+            (
+                "sin props",
+                scene.cubes.as_slice(),
+                scene.spheres.as_slice(),
+                scene.cylinders.as_slice(),
+                &[],
+            ),
+            ("solo cubos", scene.cubes.as_slice(), &[], &[], &[]),
+            (
+                "sin cubos",
+                &[],
+                scene.spheres.as_slice(),
+                scene.cylinders.as_slice(),
+                scene.forest_props.as_slice(),
+            ),
+        ] {
+            let mut framebuffer = Framebuffer::new(800, 600);
+            render(
+                &mut framebuffer,
+                &camera,
+                cubes,
+                spheres,
+                cylinders,
+                forest_props,
+                resources,
+            );
+            let started = Instant::now();
+            for _ in 0..2 {
+                render(
+                    &mut framebuffer,
+                    &camera,
+                    cubes,
+                    spheres,
+                    cylinders,
+                    forest_props,
+                    resources,
+                );
+            }
+            let average = started.elapsed() / 2;
+            println!(
+                "{label} 800x600: {:.1} ms ({:.1} FPS)",
+                average.as_secs_f32() * 1_000.0,
+                1.0 / average.as_secs_f32()
+            );
+        }
     }
 }

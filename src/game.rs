@@ -205,7 +205,13 @@ impl Game {
                 };
             }
         }
-        self.sound_events.extend(sound_events);
+        // Dos vías pueden cambiar de fase en el mismo frame. Reproducir dos
+        // veces el mismo alias solo reinicia el WAV y no añade información.
+        for event in sound_events {
+            if !self.sound_events.contains(&event) {
+                self.sound_events.push(event);
+            }
+        }
     }
 
     pub fn lane_position(&self, lane: usize) -> (f32, f32) {
