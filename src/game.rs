@@ -3,7 +3,7 @@ use crate::{
     train::train_x_bounds,
     world::{
         Environment, ForestObstacle, ForestObstacleKind, ForestSectionKind, GrassBlade, Lane,
-        LaneKind, RailwayPhase, RailwayState, Section, SectionKind, SectionSignature,
+        LaneKind, RailwayPhase, RailwayState, RiverFish, Section, SectionKind, SectionSignature,
         TrainDirection,
     },
 };
@@ -33,8 +33,8 @@ const SECTION_ATTEMPTS: usize = 96;
 const RAILWAY_CHANCE_PERCENT: usize = 10;
 const RIVER_CHANCE_PERCENT: usize = 35;
 pub const RAILWAY_REST_SECONDS: f32 = 5.5;
-pub const RAILWAY_WARNING_SECONDS: f32 = 1.5;
-pub const TRAIN_CROSSING_SECONDS: f32 = 1.10;
+pub const RAILWAY_WARNING_SECONDS: f32 = 2.0;
+pub const TRAIN_CROSSING_SECONDS: f32 = 2.5;
 
 #[derive(Clone, Copy)]
 pub enum Move {
@@ -54,6 +54,17 @@ pub enum DeathKind {
 struct PlayerJump {
     direction: Move,
     elapsed: f32,
+    landing_sound: Option<SoundEvent>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SoundEvent {
+    GrassLanding,
+    RockLanding,
+    LogLanding,
+    RailLanding,
+    TrainWarning,
+    TrainCrossing,
 }
 
 pub struct Game {
@@ -61,6 +72,7 @@ pub struct Game {
     pub player_column: usize,
     pub player_lane: usize,
     pub cycle: f32,
+    pub animation_time: f32,
     pub score: u32,
     pub game_over: bool,
     pub paused: bool,
@@ -71,6 +83,7 @@ pub struct Game {
     next_section_id: usize,
     pending_lanes: VecDeque<Lane>,
     recent_sections: VecDeque<SectionSignature>,
+    sound_events: Vec<SoundEvent>,
     random: Random,
 }
 
@@ -89,6 +102,7 @@ impl Game {
             player_column: TILE_COLUMNS / 2,
             player_lane: LANE_COUNT - 3,
             cycle: 0.0,
+            animation_time: 0.0,
             score: 0,
             game_over: false,
             paused: false,
@@ -99,6 +113,7 @@ impl Game {
             next_section_id: 0,
             pending_lanes: VecDeque::new(),
             recent_sections: VecDeque::with_capacity(RECENT_SECTION_LIMIT),
+            sound_events: Vec::new(),
             random: Random::new(seed),
         };
         game.populate_initial_lanes();
@@ -114,6 +129,7 @@ impl Game {
             return false;
         }
         self.update_player_jump(delta_seconds);
+        self.animation_time += delta_seconds;
         if self.pending_death && self.player_jump.is_none() {
             self.pending_death = false;
             self.game_over = true;
@@ -155,6 +171,7 @@ impl Game {
     }
 
     fn update_railways(&mut self, delta_seconds: f32) {
+        let mut sound_events = Vec::new();
         for lane in &mut self.lanes {
             let Some(railway) = &mut lane.railway else {
                 continue;
@@ -173,8 +190,14 @@ impl Game {
 
                 railway.elapsed -= duration;
                 railway.phase = match railway.phase {
-                    RailwayPhase::Rest => RailwayPhase::Warning,
-                    RailwayPhase::Warning => RailwayPhase::Crossing,
+                    RailwayPhase::Rest => {
+                        sound_events.push(SoundEvent::TrainWarning);
+                        RailwayPhase::Warning
+                    }
+                    RailwayPhase::Warning => {
+                        sound_events.push(SoundEvent::TrainCrossing);
+                        RailwayPhase::Crossing
+                    }
                     RailwayPhase::Crossing => {
                         railway.direction = railway.direction.opposite();
                         RailwayPhase::Rest
@@ -182,6 +205,7 @@ impl Game {
                 };
             }
         }
+        self.sound_events.extend(sound_events);
     }
 
     pub fn lane_position(&self, lane: usize) -> (f32, f32) {
@@ -226,6 +250,10 @@ impl Game {
         self.player_jump.is_some()
     }
 
+    pub fn drain_sound_events(&mut self) -> Vec<SoundEvent> {
+        std::mem::take(&mut self.sound_events)
+    }
+
     pub fn death_kind(&self) -> Option<DeathKind> {
         self.death_kind
     }
@@ -235,13 +263,19 @@ impl Game {
     }
 
     fn update_player_jump(&mut self, delta_seconds: f32) {
-        let Some(jump) = &mut self.player_jump else {
-            return;
+        let landing_sound = {
+            let Some(jump) = &mut self.player_jump else {
+                return;
+            };
+            jump.elapsed += delta_seconds;
+            if jump.elapsed < PLAYER_JUMP_DURATION_SECONDS {
+                return;
+            }
+            jump.landing_sound
         };
-
-        jump.elapsed += delta_seconds;
-        if jump.elapsed >= PLAYER_JUMP_DURATION_SECONDS {
-            self.player_jump = None;
+        self.player_jump = None;
+        if let Some(sound) = landing_sound {
+            self.sound_events.push(sound);
         }
     }
 
@@ -266,12 +300,20 @@ impl Game {
             return false;
         }
         let supported = self.lanes[lane].supports_player(column);
+        let landing_sound = match self.lanes[lane].kind {
+            LaneKind::Grass => Some(SoundEvent::GrassLanding),
+            LaneKind::Stone => Some(SoundEvent::RockLanding),
+            LaneKind::Water if supported => Some(SoundEvent::LogLanding),
+            LaneKind::Water => None,
+            LaneKind::Rail => Some(SoundEvent::RailLanding),
+        };
         self.player_column = column;
         self.player_lane = lane;
         if !supported {
             self.player_jump = Some(PlayerJump {
                 direction,
                 elapsed: 0.0,
+                landing_sound: None,
             });
             self.pending_death = true;
         } else {
@@ -285,6 +327,7 @@ impl Game {
                 self.player_jump = Some(PlayerJump {
                     direction,
                     elapsed: 0.0,
+                    landing_sound,
                 });
             }
         }
@@ -323,6 +366,7 @@ impl Game {
 
             if lateral_moves >= 2 && exit_count >= 2 {
                 self.lanes = lanes;
+                self.queue_visible_railway_warnings();
                 return;
             }
         }
@@ -331,6 +375,7 @@ impl Game {
             self.lanes = lanes;
             self.pending_lanes = pending_lanes;
             self.recent_sections = recent_sections;
+            self.queue_visible_railway_warnings();
             return;
         }
 
@@ -369,6 +414,13 @@ impl Game {
         });
         self.lanes.pop();
         let new_lane = self.next_valid_lane();
+        if new_lane
+            .railway
+            .as_ref()
+            .is_some_and(|railway| railway.phase == RailwayPhase::Warning)
+        {
+            self.sound_events.push(SoundEvent::TrainWarning);
+        }
         self.lanes.insert(0, new_lane);
         self.player_lane += 1;
         if self.player_lane >= LANE_COUNT {
@@ -402,6 +454,20 @@ impl Game {
         }
 
         self.generate_emergency_lane()
+    }
+
+    fn queue_visible_railway_warnings(&mut self) {
+        let warning_count = self
+            .lanes
+            .iter()
+            .filter(|lane| {
+                lane.railway
+                    .as_ref()
+                    .is_some_and(|railway| railway.phase == RailwayPhase::Warning)
+            })
+            .count();
+        self.sound_events
+            .extend((0..warning_count).map(|_| SoundEvent::TrainWarning));
     }
 
     fn generate_next_section(&mut self) -> Section {
@@ -487,6 +553,7 @@ impl Game {
             grass_tone_shifts: vec![0; TILE_COLUMNS],
             grass_blades: vec![Vec::new(); TILE_COLUMNS],
             platform_columns: Vec::new(),
+            fish: Vec::new(),
             railway: Some(RailwayState {
                 phase: RailwayPhase::Warning,
                 elapsed: 0.0,
@@ -593,7 +660,11 @@ impl Game {
         let obstacles: Vec<ForestObstacle> = obstacle_columns
             .into_iter()
             .zip(obstacle_kinds)
-            .map(|(column, kind)| ForestObstacle { column, kind })
+            .map(|(column, kind)| ForestObstacle {
+                column,
+                has_foliage: kind == ForestObstacleKind::Tree && self.random.range(3) == 0,
+                kind,
+            })
             .collect();
 
         let kind = if self.random.range(7) == 0 {
@@ -622,6 +693,7 @@ impl Game {
             grass_tone_shifts,
             grass_blades,
             platform_columns: Vec::new(),
+            fish: Vec::new(),
             railway: None,
         }
     }
@@ -636,6 +708,15 @@ impl Game {
             }
         }
         platform_columns.sort_unstable();
+        let mut fish = Vec::new();
+        for column in 0..TILE_COLUMNS {
+            if !platform_columns.contains(&column) && self.random.range(8) == 0 {
+                fish.push(RiverFish {
+                    column,
+                    phase: self.random.range(10_000) as f32 / 10_000.0,
+                });
+            }
+        }
 
         Lane {
             environment: Environment::River,
@@ -646,6 +727,7 @@ impl Game {
             grass_tone_shifts: vec![0; TILE_COLUMNS],
             grass_blades: vec![Vec::new(); TILE_COLUMNS],
             platform_columns,
+            fish,
             railway: None,
         }
     }
@@ -1137,6 +1219,20 @@ mod tests {
     }
 
     #[test]
+    fn landing_on_grass_emits_its_sound_after_the_jump() {
+        let mut game = Game::with_seed(1);
+        game.drain_sound_events();
+        game.player_column = 3;
+        game.lanes[game.player_lane].kind = LaneKind::Grass;
+        game.lanes[game.player_lane].obstacles.clear();
+
+        assert!(game.try_move(Move::Left));
+        assert!(game.drain_sound_events().is_empty());
+        game.update(PLAYER_JUMP_DURATION_SECONDS);
+        assert_eq!(game.drain_sound_events(), vec![SoundEvent::GrassLanding]);
+    }
+
+    #[test]
     fn blocked_move_does_not_start_a_jump() {
         let mut game = Game::with_seed(1);
         game.player_column = 3;
@@ -1145,6 +1241,7 @@ mod tests {
         game.lanes[game.player_lane].obstacles = vec![ForestObstacle {
             column: 2,
             kind: ForestObstacleKind::Rock,
+            has_foliage: false,
         }];
 
         assert!(!game.try_move(Move::Left));
@@ -1160,6 +1257,7 @@ mod tests {
         game.lanes[game.player_lane].obstacles = vec![ForestObstacle {
             column: 2,
             kind: ForestObstacleKind::Rock,
+            has_foliage: false,
         }];
         assert!(!game.try_move(Move::Left));
         assert_eq!(game.player_column, 3);
@@ -1251,6 +1349,21 @@ mod tests {
     }
 
     #[test]
+    fn river_fish_only_spawn_on_water_tiles_without_logs() {
+        let mut game = Game::with_seed(0xF15E);
+        let mut fish_count = 0;
+        for section_id in 0..80 {
+            let lane = game.generate_river_lane(section_id, 3);
+            fish_count += lane.fish.len();
+            assert!(lane
+                .fish
+                .iter()
+                .all(|fish| !lane.platform_columns.contains(&fish.column)));
+        }
+        assert!(fish_count > 0, "la probabilidad 1/8 debe producir peces");
+    }
+
+    #[test]
     fn falling_off_the_world_keeps_the_departing_position() {
         let mut game = Game::with_seed(19);
         game.player_lane = LANE_COUNT - 1;
@@ -1307,6 +1420,7 @@ mod tests {
     #[test]
     fn railway_warns_before_the_train_crosses() {
         let mut game = Game::with_seed(24);
+        game.drain_sound_events();
         let railway_index = place_test_railway(&mut game, 0);
         let railway = game.lanes[railway_index].railway.as_mut().unwrap();
         railway.phase = RailwayPhase::Rest;
@@ -1316,12 +1430,14 @@ mod tests {
         let railway = game.lanes[railway_index].railway.as_ref().unwrap();
         assert_eq!(railway.phase, RailwayPhase::Warning);
         assert!(railway.elapsed < 0.02);
+        assert_eq!(game.drain_sound_events(), vec![SoundEvent::TrainWarning]);
 
         game.update_railways(RAILWAY_WARNING_SECONDS);
         assert_eq!(
             game.lanes[railway_index].railway.as_ref().unwrap().phase,
             RailwayPhase::Crossing
         );
+        assert_eq!(game.drain_sound_events(), vec![SoundEvent::TrainCrossing]);
     }
 
     #[test]

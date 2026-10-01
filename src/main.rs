@@ -1,8 +1,10 @@
+mod audio;
 mod color;
 mod cube;
 mod cylinder;
 mod framebuffer;
 mod game;
+mod leaf_cube;
 mod material;
 mod math;
 mod obstacle;
@@ -20,6 +22,7 @@ mod ui;
 mod window;
 mod world;
 
+use audio::Audio;
 use framebuffer::Framebuffer;
 use game::{DeathKind, Game, Move};
 use math::Vec3;
@@ -35,6 +38,12 @@ use window::{Key, NativeWindow};
 
 const WIDTH: usize = 800;
 const HEIGHT: usize = 600;
+// El raytracer trabaja a la misma resolucion de la ventana. En release esta
+// configuracion ronda el objetivo de 15 FPS sin reescalado ni perdida visual.
+const RENDER_WIDTH: usize = WIDTH;
+const RENDER_HEIGHT: usize = HEIGHT;
+const TARGET_FPS: u32 = 15;
+const TARGET_FRAME_DURATION: Duration = Duration::from_micros(66_667);
 const INTRO_HOLD_SECONDS: f32 = 1.0;
 const INTRO_RISE_SECONDS: f32 = 1.45;
 const INTRO_DURATION_SECONDS: f32 = INTRO_HOLD_SECONDS + INTRO_RISE_SECONDS;
@@ -47,23 +56,43 @@ enum AppPhase {
     Death { elapsed: f32 },
 }
 
+#[derive(Default)]
+struct PerformanceStats {
+    frame_ms: f32,
+}
+
+impl PerformanceStats {
+    fn record(&mut self, elapsed: Duration) {
+        let measured = elapsed.as_secs_f32() * 1_000.0;
+        self.frame_ms = if self.frame_ms == 0.0 {
+            measured
+        } else {
+            self.frame_ms * 0.82 + measured * 0.18
+        };
+    }
+
+}
+
 fn main() {
     let window = NativeWindow::new("Creative Zone - Raytracing", WIDTH, HEIGHT);
-    let mut framebuffer = Framebuffer::new(WIDTH, HEIGHT);
+    let mut framebuffer = Framebuffer::new(RENDER_WIDTH, RENDER_HEIGHT);
     let mut camera = OrbitCamera::new(
         Vec3::new(8.5, 8.5, 11.5),
         Vec3::new(0.0, 0.0, 0.0),
         FRAC_PI_4,
     );
     let mut game = Game::new();
+    let mut audio = Audio::new();
     let skybox = Skybox::load().expect("No se pudo cargar assets/skybox/runtime");
     let render_resources = RenderResources { skybox: &skybox };
     let ui_assets = ui::UiAssets::load();
+    let mut diorama_effect = ui::DioramaEffect::new(RENDER_WIDTH, RENDER_HEIGHT);
     let mut phase = AppPhase::Intro { elapsed: 0.0 };
     let mut scene = scene::build_scene_with_player(&game, player_animation(&game, &phase, &camera));
     let mut previous_frame = Instant::now();
     let mut intro_background: Option<Vec<u32>>;
     let mut death_background: Option<Vec<u32>> = None;
+    let mut performance = PerformanceStats::default();
 
     renderer::render(
         &mut framebuffer,
@@ -74,16 +103,27 @@ fn main() {
         &scene.forest_props,
         render_resources,
     );
-    ui::blur(&mut framebuffer.color, WIDTH, HEIGHT);
+    let render_width = framebuffer.width;
+    let render_height = framebuffer.height;
+    ui::blur(&mut framebuffer.color, render_width, render_height);
     intro_background = Some(framebuffer.color.clone());
-    update_title(&window, &game, &camera, &phase);
+    update_title(
+        &window,
+        &game,
+        &camera,
+        &phase,
+        &performance,
+        framebuffer.width,
+        framebuffer.height,
+    );
 
     loop {
+        let frame_started = Instant::now();
         let Some(keys) = window.pump_messages() else {
             break;
         };
         let now = Instant::now();
-        let delta_seconds = (now - previous_frame).as_secs_f32().min(0.05);
+        let delta_seconds = (now - previous_frame).as_secs_f32().min(0.10);
         previous_frame = now;
 
         let reset = keys.iter().any(|key| matches!(key, Key::Reset));
@@ -114,7 +154,9 @@ fn main() {
                             &scene.forest_props,
                             render_resources,
                         );
-                        ui::blur(&mut framebuffer.color, WIDTH, HEIGHT);
+                        let render_width = framebuffer.width;
+                        let render_height = framebuffer.height;
+                        ui::blur(&mut framebuffer.color, render_width, render_height);
                         intro_background = Some(framebuffer.color.clone());
                     }
                     if *elapsed >= INTRO_DURATION_SECONDS {
@@ -124,8 +166,8 @@ fn main() {
                         framebuffer.color.copy_from_slice(background);
                         ui::draw_intro(
                             &mut framebuffer.color,
-                            WIDTH,
-                            HEIGHT,
+                            framebuffer.width,
+                            framebuffer.height,
                             &ui_assets,
                             intro_rise_progress(*elapsed),
                         );
@@ -155,6 +197,7 @@ fn main() {
         }
 
         if changed {
+            let render_started = Instant::now();
             scene = scene::build_scene_with_player(&game, player_animation(&game, &phase, &camera));
             renderer::render(
                 &mut framebuffer,
@@ -165,13 +208,18 @@ fn main() {
                 &scene.forest_props,
                 render_resources,
             );
+            if matches!(&phase, AppPhase::Ready | AppPhase::Playing) {
+                diorama_effect.apply(&mut framebuffer.color);
+            }
             if let AppPhase::Intro { elapsed } = &phase {
-                ui::blur(&mut framebuffer.color, WIDTH, HEIGHT);
+                let render_width = framebuffer.width;
+                let render_height = framebuffer.height;
+                ui::blur(&mut framebuffer.color, render_width, render_height);
                 intro_background = Some(framebuffer.color.clone());
                 ui::draw_intro(
                     &mut framebuffer.color,
-                    WIDTH,
-                    HEIGHT,
+                    render_width,
+                    render_height,
                     &ui_assets,
                     intro_rise_progress(*elapsed),
                 );
@@ -179,16 +227,58 @@ fn main() {
             if matches!(&phase, AppPhase::Death { .. }) {
                 death_background = Some(framebuffer.color.clone());
             }
+            performance.record(render_started.elapsed());
         }
         if let Some(fade) = death_fade {
             if let Some(background) = &death_background {
                 framebuffer.color.copy_from_slice(background);
             }
-            ui::draw_death(&mut framebuffer.color, WIDTH, HEIGHT, &ui_assets, fade);
+            let render_width = framebuffer.width;
+            let render_height = framebuffer.height;
+            ui::draw_death(
+                &mut framebuffer.color,
+                render_width,
+                render_height,
+                &ui_assets,
+                fade,
+            );
         }
-        update_title(&window, &game, &camera, &phase);
-        window.present(&framebuffer.color);
-        thread::sleep(Duration::from_millis(16));
+        audio.sync_music(matches!(&phase, AppPhase::Playing), game.paused);
+        if matches!(&phase, AppPhase::Playing) {
+            for event in game.drain_sound_events() {
+                audio.play(event);
+            }
+        }
+        update_title(
+            &window,
+            &game,
+            &camera,
+            &phase,
+            &performance,
+            framebuffer.width,
+            framebuffer.height,
+        );
+        window.present_scaled(&framebuffer.color, framebuffer.width, framebuffer.height);
+        wait_for_target_frame(frame_started);
+    }
+}
+
+fn wait_for_target_frame(started: Instant) {
+    let elapsed = started.elapsed();
+    if elapsed >= TARGET_FRAME_DURATION {
+        return;
+    }
+
+    // Windows puede despertar un sleep algunos milisegundos tarde. Dormir la
+    // mayor parte y ceder el último milisegundo mantiene el ritmo mucho más
+    // cerca de 66.67 ms sin consumir un core completo.
+    let remaining = TARGET_FRAME_DURATION - elapsed;
+    let spin_margin = Duration::from_millis(1);
+    if remaining > spin_margin {
+        thread::sleep(remaining - spin_margin);
+    }
+    while started.elapsed() < TARGET_FRAME_DURATION {
+        thread::yield_now();
     }
 }
 
@@ -293,7 +383,15 @@ fn handle_orbit_input(window: &NativeWindow, camera: &mut OrbitCamera) -> bool {
     changed
 }
 
-fn update_title(window: &NativeWindow, game: &Game, camera: &OrbitCamera, phase: &AppPhase) {
+fn update_title(
+    window: &NativeWindow,
+    game: &Game,
+    camera: &OrbitCamera,
+    phase: &AppPhase,
+    performance: &PerformanceStats,
+    render_width: usize,
+    render_height: usize,
+) {
     let state = match phase {
         AppPhase::Intro { .. } => "INTRO: R reinicia",
         AppPhase::Ready if game.paused => "LISTO: pausa para orbitar",
@@ -307,7 +405,13 @@ fn update_title(window: &NativeWindow, game: &Game, camera: &OrbitCamera, phase:
         Projection::Orthographic => "ortográfica",
     };
     window.set_title(&format!(
-        "Creative Zone | Puntos: {} | {} | {} | WASD/Flechas, Espacio, O, R",
-        game.score, state, projection
+        "Creative Zone | Puntos: {} | {} | {} | {} FPS fijos (render {:.1} ms, {}x{}) | WASD/Flechas, Espacio, O, R",
+        game.score,
+        state,
+        projection,
+        TARGET_FPS,
+        performance.frame_ms,
+        render_width,
+        render_height,
     ));
 }
