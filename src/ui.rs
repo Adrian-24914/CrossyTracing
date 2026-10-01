@@ -9,6 +9,158 @@ pub struct UiAssets {
     death: Option<Bitmap>,
 }
 
+/// Efecto de maqueta ligero: mantiene una franja nítida y mezcla las zonas
+/// lejanas con pocas muestras desenfocadas. No reserva memoria durante el frame.
+pub struct DioramaEffect {
+    width: usize,
+    height: usize,
+    radius: usize,
+    horizontal: Vec<u32>,
+    strengths: Vec<f32>,
+    top_end: usize,
+    bottom_start: usize,
+}
+
+impl DioramaEffect {
+    pub fn new(width: usize, height: usize) -> Self {
+        assert!(width > 0 && height > 0);
+        let strengths: Vec<_> = (0..height).map(|y| diorama_strength(y, height)).collect();
+        let middle = height / 2;
+        let top_end = (0..middle).rev().find(|&y| strengths[y] > 0.0).unwrap_or(0);
+        let bottom_start = (middle..height)
+            .find(|&y| strengths[y] > 0.0)
+            .unwrap_or(height - 1);
+
+        Self {
+            width,
+            height,
+            // El desenfoque se limita a los extremos: la franja central queda
+            // nitida para conservar al personaje y producir el efecto maqueta.
+            radius: 4,
+            horizontal: vec![0; width * height],
+            strengths,
+            top_end,
+            bottom_start,
+        }
+    }
+
+    pub fn apply(&mut self, pixels: &mut [u32]) {
+        assert_eq!(pixels.len(), self.width * self.height);
+        let top_needed_end = (self.top_end + self.radius).min(self.height - 1);
+        let bottom_needed_start = self.bottom_start.saturating_sub(self.radius);
+
+        for y in 0..=top_needed_end {
+            blur_horizontal_row(pixels, &mut self.horizontal, self.width, y, self.radius);
+        }
+        for y in bottom_needed_start.max(top_needed_end + 1)..self.height {
+            blur_horizontal_row(pixels, &mut self.horizontal, self.width, y, self.radius);
+        }
+
+        apply_diorama_band(
+            pixels,
+            &self.horizontal,
+            &self.strengths,
+            self.width,
+            self.height,
+            0,
+            self.top_end,
+            self.radius,
+        );
+        apply_diorama_band(
+            pixels,
+            &self.horizontal,
+            &self.strengths,
+            self.width,
+            self.height,
+            self.bottom_start,
+            self.height - 1,
+            self.radius,
+        );
+    }
+}
+
+fn diorama_strength(y: usize, height: usize) -> f32 {
+    let normalized_y = (y as f32 + 0.5) / height as f32;
+    let distance = (normalized_y - 0.54).abs();
+    let transition = ((distance - 0.16) / 0.22).clamp(0.0, 1.0);
+    let smooth = transition * transition * (3.0 - 2.0 * transition);
+    smooth * 0.72
+}
+
+fn blur_horizontal_row(source: &[u32], target: &mut [u32], width: usize, y: usize, radius: usize) {
+    let row = y * width;
+    let mut red = 0_u32;
+    let mut green = 0_u32;
+    let mut blue = 0_u32;
+    let mut samples = 0_u32;
+    for x in 0..=radius.min(width - 1) {
+        add_channels(source[row + x], &mut red, &mut green, &mut blue);
+        samples += 1;
+    }
+
+    for x in 0..width {
+        target[row + x] = average_color(red, green, blue, samples);
+        if x >= radius {
+            subtract_channels(source[row + x - radius], &mut red, &mut green, &mut blue);
+            samples -= 1;
+        }
+        let incoming = x + radius + 1;
+        if incoming < width {
+            add_channels(source[row + incoming], &mut red, &mut green, &mut blue);
+            samples += 1;
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_diorama_band(
+    pixels: &mut [u32],
+    horizontal: &[u32],
+    strengths: &[f32],
+    width: usize,
+    height: usize,
+    start: usize,
+    end: usize,
+    radius: usize,
+) {
+    for y in start..=end {
+        let strength = strengths[y];
+        if strength <= 0.0 {
+            continue;
+        }
+        let vertical_offset = ((radius as f32 * strength / 0.72).round() as usize).max(1);
+        let upper_row = y.saturating_sub(vertical_offset) * width;
+        let center_row = y * width;
+        let lower_row = (y + vertical_offset).min(height - 1) * width;
+        for x in 0..width {
+            let upper = horizontal[upper_row + x];
+            let center = horizontal[center_row + x];
+            let lower = horizontal[lower_row + x];
+            let red = (upper >> 16 & 0xFF) + (center >> 16 & 0xFF) + (lower >> 16 & 0xFF);
+            let green = (upper >> 8 & 0xFF) + (center >> 8 & 0xFF) + (lower >> 8 & 0xFF);
+            let blue = (upper & 0xFF) + (center & 0xFF) + (lower & 0xFF);
+            let index = center_row + x;
+            pixels[index] = blend(pixels[index], average_color(red, green, blue, 3), strength);
+        }
+    }
+}
+
+fn add_channels(color: u32, red: &mut u32, green: &mut u32, blue: &mut u32) {
+    *red += color >> 16 & 0xFF;
+    *green += color >> 8 & 0xFF;
+    *blue += color & 0xFF;
+}
+
+fn subtract_channels(color: u32, red: &mut u32, green: &mut u32, blue: &mut u32) {
+    *red -= color >> 16 & 0xFF;
+    *green -= color >> 8 & 0xFF;
+    *blue -= color & 0xFF;
+}
+
+fn average_color(red: u32, green: u32, blue: u32, samples: u32) -> u32 {
+    (red / samples) << 16 | (green / samples) << 8 | blue / samples
+}
+
 impl UiAssets {
     pub fn load() -> Self {
         let project = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -388,6 +540,30 @@ mod tests {
         pixels[4] = 0xFFFFFF;
         blur(&mut pixels, 3, 3);
         assert!(pixels[0] > 0 && pixels[4] < 0xFFFFFF);
+    }
+
+    #[test]
+    fn diorama_effect_keeps_the_focus_band_sharp_and_blurs_the_edges() {
+        let width = 80;
+        let height = 60;
+        let mut pixels: Vec<_> = (0..width * height)
+            .map(|index| if index % 2 == 0 { 0xFFFFFF } else { 0 })
+            .collect();
+        let original = pixels.clone();
+        let mut effect = DioramaEffect::new(width, height);
+
+        effect.apply(&mut pixels);
+
+        let focus_y = (height as f32 * 0.54) as usize;
+        assert_eq!(
+            &pixels[focus_y * width..(focus_y + 1) * width],
+            &original[focus_y * width..(focus_y + 1) * width]
+        );
+        assert_ne!(&pixels[..width], &original[..width]);
+        assert_ne!(
+            &pixels[(height - 1) * width..],
+            &original[(height - 1) * width..]
+        );
     }
 
     #[test]

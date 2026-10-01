@@ -283,13 +283,15 @@ impl NativeWindow {
         }
     }
 
-    pub fn present(&self, pixels: &[u32]) {
-        assert_eq!(pixels.len(), self.width * self.height);
+    /// Presenta un buffer de cualquier resolución a tamaño completo de la
+    /// ventana. La salida siempre conserva el viewport solicitado por el juego.
+    pub fn present_scaled(&self, pixels: &[u32], source_width: usize, source_height: usize) {
+        assert_eq!(pixels.len(), source_width * source_height);
         let bitmap_info = BitmapInfo {
             header: BitmapInfoHeader {
                 size: std::mem::size_of::<BitmapInfoHeader>() as u32,
-                width: self.width as i32,
-                height: -(self.height as i32),
+                width: source_width as i32,
+                height: -(source_height as i32),
                 planes: 1,
                 bit_count: 32,
                 compression: BI_RGB,
@@ -317,8 +319,8 @@ impl NativeWindow {
                 self.height as i32,
                 0,
                 0,
-                self.width as i32,
-                self.height as i32,
+                source_width as i32,
+                source_height as i32,
                 pixels.as_ptr().cast(),
                 &bitmap_info,
                 DIB_RGB_COLORS,
