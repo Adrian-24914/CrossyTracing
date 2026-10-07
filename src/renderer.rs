@@ -11,7 +11,7 @@ use crate::{
     skybox::Skybox,
     sphere::Sphere,
 };
-use std::thread;
+use rayon::prelude::*;
 
 const AMBIENT_LIGHT: f32 = 0.34;
 const SKY_FILL_LIGHT: f32 = 0.10;
@@ -87,6 +87,9 @@ struct TraceScene<'a> {
     objects: Vec<BoundedObject>,
     nodes: Vec<BvhNode>,
     root: Option<usize>,
+    shadow_objects: Vec<BoundedObject>,
+    shadow_nodes: Vec<BvhNode>,
+    shadow_root: Option<usize>,
 }
 
 impl<'a> TraceScene<'a> {
@@ -141,6 +144,22 @@ impl<'a> TraceScene<'a> {
             let object_count = objects.len();
             build_bvh_node(&mut objects, &mut nodes, 0, object_count)
         });
+        let mut shadow_objects: Vec<_> = forest_props
+            .iter()
+            .enumerate()
+            .map(|(index, prop)| {
+                let (center, radius) = prop.bounds();
+                BoundedObject {
+                    object: SceneObject::ForestProp(index),
+                    bounds: Bounds::around(center, radius),
+                }
+            })
+            .collect();
+        let mut shadow_nodes = Vec::with_capacity(shadow_objects.len() * 2);
+        let shadow_root = (!shadow_objects.is_empty()).then(|| {
+            let object_count = shadow_objects.len();
+            build_bvh_node(&mut shadow_objects, &mut shadow_nodes, 0, object_count)
+        });
         Self {
             cubes,
             spheres,
@@ -149,6 +168,9 @@ impl<'a> TraceScene<'a> {
             objects,
             nodes,
             root,
+            shadow_objects,
+            shadow_nodes,
+            shadow_root,
         }
     }
 }
@@ -219,33 +241,22 @@ pub fn render(
     let height = framebuffer.height;
     let ray_grid = camera.ray_grid(width, height);
     let trace_scene = TraceScene::new(cubes, spheres, cylinders, forest_props);
-    let thread_count = thread::available_parallelism()
-        .map(|count| count.get())
-        .unwrap_or(1)
-        .min(height);
-    let rows_per_thread = height.div_ceil(thread_count);
 
-    thread::scope(|scope| {
-        for (chunk_index, pixels) in framebuffer
-            .color
-            .chunks_mut(width * rows_per_thread)
-            .enumerate()
-        {
-            let start_y = chunk_index * rows_per_thread;
-            let trace_scene = &trace_scene;
-            scope.spawn(move || {
-                for (local_y, row) in pixels.chunks_mut(width).enumerate() {
-                    let y = start_y + local_y;
-                    let mut rays = ray_grid.row(y);
-                    for pixel in row {
-                        let ray = rays.next();
-                        let color = trace_primary(&ray, trace_scene, light_direction, resources);
-                        *pixel = color.to_hex();
-                    }
-                }
-            });
-        }
-    });
+    // Rayon conserva un pool de hilos entre frames y reparte las filas de
+    // manera dinámica. Así, las zonas con agua, reflejos o muchos objetos no
+    // dejan a un único hilo trabajando mientras los demás ya terminaron.
+    framebuffer
+        .color
+        .par_chunks_mut(width)
+        .enumerate()
+        .for_each(|(y, row)| {
+            let mut rays = ray_grid.row(y);
+            for pixel in row {
+                let ray = rays.next();
+                let color = trace_primary(&ray, &trace_scene, light_direction, resources);
+                *pixel = color.to_hex();
+            }
+        });
 }
 
 fn closest_hit(
@@ -355,10 +366,28 @@ fn intersect_object(
 fn ray_bounds_near(ray: &Ray, bounds: Bounds, maximum_distance: f32) -> Option<f32> {
     let mut near: f32 = 0.001;
     let mut far = maximum_distance;
-    for (origin, direction, minimum, maximum) in [
-        (ray.origin.x, ray.direction.x, bounds.min.x, bounds.max.x),
-        (ray.origin.y, ray.direction.y, bounds.min.y, bounds.max.y),
-        (ray.origin.z, ray.direction.z, bounds.min.z, bounds.max.z),
+    for (origin, direction, inverse, minimum, maximum) in [
+        (
+            ray.origin.x,
+            ray.direction.x,
+            ray.inverse_direction.x,
+            bounds.min.x,
+            bounds.max.x,
+        ),
+        (
+            ray.origin.y,
+            ray.direction.y,
+            ray.inverse_direction.y,
+            bounds.min.y,
+            bounds.max.y,
+        ),
+        (
+            ray.origin.z,
+            ray.direction.z,
+            ray.inverse_direction.z,
+            bounds.min.z,
+            bounds.max.z,
+        ),
     ] {
         if direction.abs() < 0.000_001 {
             if origin < minimum || origin > maximum {
@@ -366,7 +395,6 @@ fn ray_bounds_near(ray: &Ray, bounds: Bounds, maximum_distance: f32) -> Option<f
             }
             continue;
         }
-        let inverse = 1.0 / direction;
         let first = (minimum - origin) * inverse;
         let second = (maximum - origin) * inverse;
         near = near.max(first.min(second));
@@ -395,12 +423,7 @@ fn trace_primary(
         // perder la lectura visual de árboles, troncos y obstáculos.
         && hit.normal.y > 0.90
         && hit.normal.dot(light_direction) > 0.0
-        && is_shadowed(
-            hit_point,
-            hit.normal,
-            light_direction,
-            scene.forest_props,
-        );
+        && is_shadowed(hit_point, hit.normal, light_direction, scene);
     let mut surface = shade_with_shadow(ray, hit, material, light_direction, shadowed);
     if material.transparency > 0.0 {
         let behind = if material.refraction_index > 1.0 {
@@ -531,12 +554,44 @@ fn is_shadowed(
     hit_point: Vec3,
     normal: Vec3,
     light_direction: Vec3,
-    forest_props: &[ForestProp],
+    scene: &TraceScene<'_>,
 ) -> bool {
     let shadow_ray = Ray::new(hit_point + normal * 0.002, light_direction);
-    forest_props
-        .iter()
-        .any(|prop| prop.intersect_shadow(&shadow_ray))
+    forest_shadow_hit(&shadow_ray, scene)
+}
+
+fn forest_shadow_hit(ray: &Ray, scene: &TraceScene<'_>) -> bool {
+    let Some(root) = scene.shadow_root else {
+        return false;
+    };
+    let mut stack = [0_usize; 64];
+    let mut stack_length = 1;
+    stack[0] = root;
+
+    while stack_length > 0 {
+        stack_length -= 1;
+        let node = &scene.shadow_nodes[stack[stack_length]];
+        if ray_bounds_near(ray, node.bounds, f32::INFINITY).is_none() {
+            continue;
+        }
+
+        if node.count > 0 {
+            for bounded in &scene.shadow_objects[node.start..node.start + node.count] {
+                let SceneObject::ForestProp(index) = bounded.object else {
+                    continue;
+                };
+                if scene.forest_props[index].intersect_shadow(ray) {
+                    return true;
+                }
+            }
+            continue;
+        }
+
+        stack[stack_length] = node.left;
+        stack[stack_length + 1] = node.right;
+        stack_length += 2;
+    }
+    false
 }
 
 fn blend(front: Color, behind: Color, opacity: f32) -> Color {
@@ -646,13 +701,9 @@ mod tests {
         };
         let ray = Ray::new(Vec3::default(), Vec3::new(0.0, -1.0, 0.0));
         let light = Vec3::new(0.0, 1.0, 0.0);
+        let scene = TraceScene::new(&[], &[], &[], &forest_props);
 
-        assert!(is_shadowed(
-            Vec3::default(),
-            hit.normal,
-            light,
-            &forest_props,
-        ));
+        assert!(is_shadowed(Vec3::default(), hit.normal, light, &scene,));
         let lit = shade_with_shadow(
             &ray,
             hit,
@@ -730,12 +781,13 @@ mod tests {
         let camera = OrbitCamera::new(Vec3::new(8.5, 8.5, 11.5), Vec3::default(), FRAC_PI_4);
         let skybox = Skybox::solid(Color::new(120, 170, 220));
         let resources = RenderResources { skybox: &skybox };
-        for (width, height) in [(640, 480), (720, 540), (800, 600)] {
+        for preset in crate::display::DisplayPreset::ALL {
+            let (width, height) = preset.render_size();
             let mut framebuffer = Framebuffer::new(width, height);
             let mut diorama_effect = crate::ui::DioramaEffect::new(width, height);
 
-            // El primer frame estabiliza los hilos y las cachés; los siguientes
-            // tres son los que se promedian para comparar optimizaciones.
+            // El primer frame estabiliza el pool y las cachés. Medir varios
+            // frames permite detectar picos, no solo un promedio favorable.
             render(
                 &mut framebuffer,
                 &camera,
@@ -746,8 +798,9 @@ mod tests {
                 resources,
             );
             diorama_effect.apply(&mut framebuffer.color);
-            let started = Instant::now();
-            for _ in 0..3 {
+            let mut samples = Vec::with_capacity(12);
+            for _ in 0..12 {
+                let started = Instant::now();
                 render(
                     &mut framebuffer,
                     &camera,
@@ -758,12 +811,17 @@ mod tests {
                     resources,
                 );
                 diorama_effect.apply(&mut framebuffer.color);
+                samples.push(started.elapsed());
             }
-            let average = started.elapsed() / 3;
+            samples.sort_unstable();
+            let average = samples.iter().sum::<Duration>() / samples.len() as u32;
+            let percentile_95 = samples[samples.len() * 95 / 100];
             println!(
-                "buffer {width}x{height}: {:.1} ms ({:.1} FPS)",
+                "buffer {} {width}x{height}: avg {:.1} ms ({:.1} FPS), p95 {:.1} ms",
+                preset.label(),
                 average.as_secs_f32() * 1_000.0,
-                1.0 / average.as_secs_f32()
+                1.0 / average.as_secs_f32(),
+                percentile_95.as_secs_f32() * 1_000.0,
             );
             assert!(average < Duration::from_secs(1));
         }

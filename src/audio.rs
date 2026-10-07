@@ -36,7 +36,7 @@ use crate::game::SoundEvent;
 
 const GRASS_VOLUME: u32 = 80;
 const ROCKS_VOLUME: u32 = 120;
-const LOG_WATER_VOLUME: u32 = 120;
+const LOG_WATER_VOLUME: u32 = 200;
 const RAIL_VOLUME: u32 = 120;
 const TRAIN_WARNING_VOLUME: u32 = 120;
 const TRAIN_VOLUME: u32 = 120;
