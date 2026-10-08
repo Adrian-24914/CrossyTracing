@@ -1,4 +1,5 @@
 use crate::{color::Color, math::Vec3};
+#[cfg(not(target_arch = "wasm32"))]
 use std::{fs, path::Path};
 
 pub struct Skybox {
@@ -11,6 +12,7 @@ pub struct Skybox {
 }
 
 impl Skybox {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn load() -> Result<Self, String> {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/skybox/runtime");
         Ok(Self {
@@ -20,6 +22,18 @@ impl Skybox {
             negative_y: Image::load_bmp(&root.join("negy.bmp"))?,
             positive_z: Image::load_bmp(&root.join("posz.bmp"))?,
             negative_z: Image::load_bmp(&root.join("negz.bmp"))?,
+        })
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn load() -> Result<Self, String> {
+        Ok(Self {
+            positive_x: Image::from_bmp_bytes(include_bytes!("../assets/skybox/runtime/posx.bmp"))?,
+            negative_x: Image::from_bmp_bytes(include_bytes!("../assets/skybox/runtime/negx.bmp"))?,
+            positive_y: Image::from_bmp_bytes(include_bytes!("../assets/skybox/runtime/posy.bmp"))?,
+            negative_y: Image::from_bmp_bytes(include_bytes!("../assets/skybox/runtime/negy.bmp"))?,
+            positive_z: Image::from_bmp_bytes(include_bytes!("../assets/skybox/runtime/posz.bmp"))?,
+            negative_z: Image::from_bmp_bytes(include_bytes!("../assets/skybox/runtime/negz.bmp"))?,
         })
     }
 
@@ -75,6 +89,7 @@ struct Image {
 }
 
 impl Image {
+    #[cfg(not(target_arch = "wasm32"))]
     fn load_bmp(path: &Path) -> Result<Self, String> {
         let bytes = fs::read(path).map_err(|error| format!("{}: {error}", path.display()))?;
         Self::from_bmp_bytes(&bytes).map_err(|error| format!("{}: {error}", path.display()))

@@ -1,3 +1,4 @@
+#[cfg(not(target_arch = "wasm32"))]
 use std::{fs, path::Path};
 
 pub struct UiAssets {
@@ -158,11 +159,20 @@ fn average_color(red: u32, green: u32, blue: u32, samples: u32) -> u32 {
 }
 
 impl UiAssets {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn load() -> Self {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/ui/runtime");
         Self {
             intro: Bitmap::load_bmp(&root.join("intro.bmp")),
             death: Bitmap::load_bmp(&root.join("death.bmp")),
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn load() -> Self {
+        Self {
+            intro: Bitmap::from_bmp_bytes(include_bytes!("../assets/ui/runtime/intro.bmp")),
+            death: Bitmap::from_bmp_bytes(include_bytes!("../assets/ui/runtime/death.bmp")),
         }
     }
 }
@@ -397,6 +407,7 @@ struct Bitmap {
 }
 
 impl Bitmap {
+    #[cfg(not(target_arch = "wasm32"))]
     fn load_bmp(path: &Path) -> Option<Self> {
         let bytes = fs::read(path).ok()?;
         Self::from_bmp_bytes(&bytes)
