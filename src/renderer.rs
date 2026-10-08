@@ -6,11 +6,12 @@ use crate::{
     material::{Finish, Material},
     math::Vec3,
     obstacle::ForestProp,
-    orbit_camera::OrbitCamera,
+    orbit_camera::{CameraRayGrid, OrbitCamera},
     ray::{Hit, Ray},
     skybox::Skybox,
     sphere::Sphere,
 };
+#[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
 
 const AMBIENT_LIGHT: f32 = 0.34;
@@ -242,21 +243,46 @@ pub fn render(
     let ray_grid = camera.ray_grid(width, height);
     let trace_scene = TraceScene::new(cubes, spheres, cylinders, forest_props);
 
-    // Rayon conserva un pool de hilos entre frames y reparte las filas de
-    // manera dinámica. Así, las zonas con agua, reflejos o muchos objetos no
-    // dejan a un único hilo trabajando mientras los demás ya terminaron.
-    framebuffer
-        .color
-        .par_chunks_mut(width)
-        .enumerate()
-        .for_each(|(y, row)| {
-            let mut rays = ray_grid.row(y);
-            for pixel in row {
-                let ray = rays.next();
-                let color = trace_primary(&ray, &trace_scene, light_direction, resources);
-                *pixel = color.to_hex();
-            }
-        });
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // Rayon conserva un pool de hilos entre frames y reparte las filas de
+        // manera dinámica. Así, las zonas con agua, reflejos o muchos objetos no
+        // dejan a un único hilo trabajando mientras los demás ya terminaron.
+        framebuffer
+            .color
+            .par_chunks_mut(width)
+            .enumerate()
+            .for_each(|(y, row)| {
+                render_row(row, y, ray_grid, &trace_scene, light_direction, resources);
+            });
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        framebuffer
+            .color
+            .chunks_mut(width)
+            .enumerate()
+            .for_each(|(y, row)| {
+                render_row(row, y, ray_grid, &trace_scene, light_direction, resources);
+            });
+    }
+}
+
+fn render_row(
+    row: &mut [u32],
+    y: usize,
+    ray_grid: CameraRayGrid,
+    trace_scene: &TraceScene<'_>,
+    light_direction: Vec3,
+    resources: RenderResources<'_>,
+) {
+    let mut rays = ray_grid.row(y);
+    for pixel in row {
+        let ray = rays.next();
+        let color = trace_primary(&ray, trace_scene, light_direction, resources);
+        *pixel = color.to_hex();
+    }
 }
 
 fn closest_hit(
