@@ -77,26 +77,27 @@ struct Image {
 impl Image {
     fn load_bmp(path: &Path) -> Result<Self, String> {
         let bytes = fs::read(path).map_err(|error| format!("{}: {error}", path.display()))?;
+        Self::from_bmp_bytes(&bytes).map_err(|error| format!("{}: {error}", path.display()))
+    }
+
+    fn from_bmp_bytes(bytes: &[u8]) -> Result<Self, String> {
         if bytes.len() < 54 || &bytes[..2] != b"BM" {
-            return Err(format!("{} no es un BMP válido", path.display()));
+            return Err("no es un BMP válido".to_string());
         }
 
-        let pixel_offset = read_u32(&bytes, 10)? as usize;
-        let width = read_i32(&bytes, 18)?;
-        let signed_height = read_i32(&bytes, 22)?;
-        let planes = read_u16(&bytes, 26)?;
-        let bits_per_pixel = read_u16(&bytes, 28)?;
-        let compression = read_u32(&bytes, 30)?;
+        let pixel_offset = read_u32(bytes, 10)? as usize;
+        let width = read_i32(bytes, 18)?;
+        let signed_height = read_i32(bytes, 22)?;
+        let planes = read_u16(bytes, 26)?;
+        let bits_per_pixel = read_u16(bytes, 28)?;
+        let compression = read_u32(bytes, 30)?;
         if width <= 0
             || signed_height == 0
             || planes != 1
             || !matches!(bits_per_pixel, 24 | 32)
             || compression != 0
         {
-            return Err(format!(
-                "{} usa un formato BMP no soportado",
-                path.display()
-            ));
+            return Err("usa un formato BMP no soportado".to_string());
         }
 
         let width = width as usize;
@@ -105,7 +106,7 @@ impl Image {
         let row_stride = (width * bytes_per_pixel).div_ceil(4) * 4;
         let required = pixel_offset + row_stride * height;
         if required > bytes.len() {
-            return Err(format!("{} está truncado", path.display()));
+            return Err("está truncado".to_string());
         }
 
         let bottom_up = signed_height > 0;
@@ -200,6 +201,15 @@ mod tests {
         assert_eq!(skybox.negative_y.pixels.len(), 512 * 512);
         assert_eq!(skybox.positive_z.pixels.len(), 512 * 512);
         assert_eq!(skybox.negative_z.pixels.len(), 512 * 512);
+    }
+
+    #[test]
+    fn parses_a_face_directly_from_bmp_bytes() {
+        let image =
+            Image::from_bmp_bytes(include_bytes!("../assets/skybox/runtime/posx.bmp")).unwrap();
+        assert_eq!(image.width, 512);
+        assert_eq!(image.height, 512);
+        assert_eq!(image.pixels.len(), 512 * 512);
     }
 
     #[test]

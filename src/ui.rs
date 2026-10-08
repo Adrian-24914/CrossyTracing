@@ -399,22 +399,26 @@ struct Bitmap {
 impl Bitmap {
     fn load_bmp(path: &Path) -> Option<Self> {
         let bytes = fs::read(path).ok()?;
+        Self::from_bmp_bytes(&bytes)
+    }
+
+    fn from_bmp_bytes(bytes: &[u8]) -> Option<Self> {
         if bytes.len() < 54 || &bytes[..2] != b"BM" {
             return None;
         }
-        let pixel_offset = read_u32(&bytes, 10)? as usize;
-        let width = read_i32(&bytes, 18)?;
-        let signed_height = read_i32(&bytes, 22)?;
+        let pixel_offset = read_u32(bytes, 10)? as usize;
+        let width = read_i32(bytes, 18)?;
+        let signed_height = read_i32(bytes, 22)?;
         if width <= 0
             || signed_height == 0
-            || !matches!(read_u16(&bytes, 28)?, 24 | 32)
-            || read_u32(&bytes, 30)? != 0
+            || !matches!(read_u16(bytes, 28)?, 24 | 32)
+            || read_u32(bytes, 30)? != 0
         {
             return None;
         }
         let width = width as usize;
         let height = signed_height.unsigned_abs() as usize;
-        let bits_per_pixel = read_u16(&bytes, 28)? as usize;
+        let bits_per_pixel = read_u16(bytes, 28)? as usize;
         let bytes_per_pixel = bits_per_pixel / 8;
         let stride = (width * bytes_per_pixel).div_ceil(4) * 4;
         if pixel_offset + stride * height > bytes.len() {
@@ -469,6 +473,15 @@ fn read_i32(bytes: &[u8], offset: usize) -> Option<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_intro_directly_from_bmp_bytes() {
+        let bitmap =
+            Bitmap::from_bmp_bytes(include_bytes!("../assets/ui/runtime/intro.bmp")).unwrap();
+        assert_eq!(bitmap.width, 480);
+        assert_eq!(bitmap.height, 300);
+        assert_eq!(bitmap.pixels.len(), 480 * 300);
+    }
 
     #[test]
     fn blur_averages_adjacent_pixels() {
