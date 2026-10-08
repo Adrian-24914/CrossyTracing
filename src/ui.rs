@@ -1,8 +1,4 @@
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    process::Command,
-};
+use std::{fs, path::Path};
 
 pub struct UiAssets {
     intro: Option<Bitmap>,
@@ -163,72 +159,12 @@ fn average_color(red: u32, green: u32, blue: u32, samples: u32) -> u32 {
 
 impl UiAssets {
     pub fn load() -> Self {
-        let project = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let ui_root = project.join("assets/ui");
-        ensure_runtime_bitmap(project, &ui_root, "intro", 480, 300);
-        ensure_runtime_bitmap(project, &ui_root, "death", 600, 120);
-        let root = ui_root.join("runtime");
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/ui/runtime");
         Self {
             intro: Bitmap::load_bmp(&root.join("intro.bmp")),
             death: Bitmap::load_bmp(&root.join("death.bmp")),
         }
     }
-}
-
-fn ensure_runtime_bitmap(project: &Path, ui_root: &Path, name: &str, width: u32, height: u32) {
-    let Some(source) = find_source(ui_root, name) else {
-        return;
-    };
-    let destination = ui_root.join("runtime").join(format!("{name}.bmp"));
-    if is_current(&source, &destination) {
-        return;
-    }
-    if let Some(parent) = destination.parent() {
-        if let Err(error) = fs::create_dir_all(parent) {
-            eprintln!("No se pudo crear {}: {error}", parent.display());
-            return;
-        }
-    }
-
-    let converter = project.join("tools/convert_ui_image.ps1");
-    let converted = ["powershell.exe", "pwsh.exe"].into_iter().any(|shell| {
-        Command::new(shell)
-            .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
-            .arg(&converter)
-            .arg("-Source")
-            .arg(&source)
-            .arg("-Destination")
-            .arg(&destination)
-            .arg("-MaximumWidth")
-            .arg(width.to_string())
-            .arg("-MaximumHeight")
-            .arg(height.to_string())
-            .status()
-            .is_ok_and(|status| status.success())
-    });
-    if !converted {
-        eprintln!("No se pudo convertir {} a BMP", source.display());
-    }
-}
-
-fn find_source(root: &Path, name: &str) -> Option<PathBuf> {
-    ["png", "jpg", "jpeg", "bmp"]
-        .into_iter()
-        .map(|extension| root.join(format!("{name}.{extension}")))
-        .find(|path| path.is_file())
-}
-
-fn is_current(source: &Path, destination: &Path) -> bool {
-    let Ok(source_time) = fs::metadata(source).and_then(|metadata| metadata.modified()) else {
-        return false;
-    };
-    let is_alpha_bitmap = fs::read(destination)
-        .ok()
-        .is_some_and(|bytes| read_u16(&bytes, 28) == Some(32));
-    is_alpha_bitmap
-        && fs::metadata(destination)
-            .and_then(|metadata| metadata.modified())
-            .is_ok_and(|destination_time| destination_time >= source_time)
 }
 
 pub fn blur(pixels: &mut [u32], width: usize, height: usize) {
