@@ -35,10 +35,21 @@
         font: 14px system-ui, sans-serif;
         text-align: center;
       }
+
+      #metrics {
+        position: fixed;
+        inset: 0.75rem auto auto 0.75rem;
+        padding: 0.4rem 0.55rem;
+        color: #d7ffd7;
+        background: rgb(0 0 0 / 72%);
+        font: 12px ui-monospace, monospace;
+        pointer-events: none;
+      }
     </style>
   </head>
   <body>
     <canvas id="game" width="816" height="612" aria-label="Crossy Tracing"></canvas>
+    <output id="metrics">Midiendo rendimiento WASM…</output>
     <p id="status">Cargando Crossy Tracing…</p>
     <script type="module">
       import init from "./pkg/crossy_tracing.js";

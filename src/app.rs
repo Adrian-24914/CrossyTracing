@@ -159,6 +159,10 @@ impl App {
         &self.framebuffer
     }
 
+    pub fn render_time_ms(&self) -> f32 {
+        self.performance.frame_ms
+    }
+
     pub fn take_window_size_request(&mut self) -> Option<(usize, usize)> {
         self.pending_window_size.take()
     }
