@@ -1,21 +1,7 @@
 #![allow(dead_code)]
 
+use crate::input::InputState;
 use std::cell::Cell;
-
-#[derive(Clone, Copy)]
-pub enum Key {
-    Left,
-    Right,
-    Up,
-    Down,
-    Pause,
-    Reset,
-    Orthographic,
-    DisplayPerformance,
-    DisplayHigh,
-    DisplayUltra,
-    Start,
-}
 
 pub struct NativeWindow {
     client_size: Cell<(usize, usize)>,
@@ -28,12 +14,8 @@ impl NativeWindow {
         }
     }
 
-    pub fn pump_messages(&self) -> Option<Vec<Key>> {
-        Some(Vec::new())
-    }
-
-    pub fn is_key_down(&self, _key: Key) -> bool {
-        false
+    pub fn pump_messages(&self) -> Option<InputState> {
+        Some(InputState::new(Vec::new(), |_| false))
     }
 
     pub fn set_title(&self, _title: &str) {}

@@ -6,6 +6,7 @@ mod cylinder;
 mod display;
 mod framebuffer;
 mod game;
+mod input;
 mod leaf_cube;
 mod material;
 mod math;
@@ -41,14 +42,17 @@ fn main() {
 
     loop {
         let frame_started = Instant::now();
-        let Some(keys) = window.pump_messages() else {
+        let Some(input) = window.pump_messages() else {
             break;
         };
         let now = Instant::now();
         let delta_seconds = (now - previous_frame).as_secs_f32().min(0.10);
         previous_frame = now;
 
-        app.update(&keys, &window, delta_seconds);
+        app.update(&input, delta_seconds);
+        if let Some((width, height)) = app.take_window_size_request() {
+            window.set_client_size(width, height);
+        }
         app.render();
         window.set_title(&app.window_title());
         let framebuffer = app.framebuffer();

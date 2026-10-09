@@ -1,3 +1,4 @@
+use crate::input::{InputState, Key};
 use std::{ffi::c_void, mem::zeroed, ptr::null};
 
 type Handle = isize;
@@ -35,21 +36,6 @@ const VK_O: usize = 0x4F;
 const VK_F1: usize = 0x70;
 const VK_F2: usize = 0x71;
 const VK_F3: usize = 0x72;
-
-#[derive(Clone, Copy)]
-pub enum Key {
-    Left,
-    Right,
-    Up,
-    Down,
-    Pause,
-    Reset,
-    Orthographic,
-    DisplayPerformance,
-    DisplayHigh,
-    DisplayUltra,
-    Start,
-}
 
 #[repr(C)]
 struct Point {
@@ -264,7 +250,7 @@ impl NativeWindow {
         }
     }
 
-    pub fn pump_messages(&self) -> Option<Vec<Key>> {
+    pub fn pump_messages(&self) -> Option<InputState> {
         let mut pressed = Vec::new();
         unsafe {
             let mut message: Message = zeroed();
@@ -296,10 +282,10 @@ impl NativeWindow {
                 DispatchMessageW(&message);
             }
         }
-        Some(pressed)
+        Some(InputState::new(pressed, |key| self.is_key_down(key)))
     }
 
-    pub fn is_key_down(&self, key: Key) -> bool {
+    fn is_key_down(&self, key: Key) -> bool {
         unsafe {
             match key {
                 Key::Left => key_down(0x41) || key_down(VK_LEFT),

@@ -3,6 +3,7 @@ use crate::{
     display::{DisplayPreset, DEFAULT_DISPLAY_PRESET},
     framebuffer::Framebuffer,
     game::{DeathKind, Game, Move},
+    input::{InputState, Key},
     math::Vec3,
     orbit_camera::{OrbitCamera, Projection},
     player,
@@ -10,7 +11,6 @@ use crate::{
     scene::{self, Scene},
     skybox::Skybox,
     ui::{self, DioramaEffect, UiAssets},
-    window::{Key, NativeWindow},
 };
 use std::{
     f32::consts::FRAC_PI_4,
@@ -103,6 +103,7 @@ pub struct App {
     performance: PerformanceStats,
     adaptive_quality: AdaptiveQuality,
     pending_render_size: Option<(usize, usize)>,
+    pending_window_size: Option<(usize, usize)>,
     needs_render: bool,
 }
 
@@ -141,6 +142,7 @@ impl App {
             performance: PerformanceStats::default(),
             adaptive_quality: AdaptiveQuality::default(),
             pending_render_size: None,
+            pending_window_size: None,
             needs_render: false,
         };
         app.render_current_scene(None);
@@ -152,9 +154,13 @@ impl App {
         &self.framebuffer
     }
 
-    pub fn update(&mut self, keys: &[Key], window: &NativeWindow, delta_seconds: f32) {
+    pub fn take_window_size_request(&mut self) -> Option<(usize, usize)> {
+        self.pending_window_size.take()
+    }
+
+    pub fn update(&mut self, input: &InputState, delta_seconds: f32) {
         self.death_fade = None;
-        let reset = keys.iter().any(|key| matches!(key, Key::Reset));
+        let reset = input.was_pressed(Key::Reset);
         let mut changed = false;
 
         if let Some((render_width, render_height)) = self.pending_render_size.take() {
@@ -162,14 +168,14 @@ impl App {
             changed = true;
         }
 
-        if let Some(requested_preset) = requested_display_preset(keys) {
+        if let Some(requested_preset) = requested_display_preset(input.pressed()) {
             if requested_preset != self.display_preset {
                 self.display_preset = requested_preset;
                 self.adaptive_quality.reset();
                 self.pending_render_size = None;
                 let (window_width, window_height) = self.display_preset.window_size();
                 let (render_width, render_height) = self.display_preset.render_size();
-                window.set_client_size(window_width, window_height);
+                self.pending_window_size = Some((window_width, window_height));
                 self.resize_rendering(render_width, render_height);
                 changed = true;
             }
@@ -182,7 +188,7 @@ impl App {
             self.death_background = None;
             changed = true;
         } else {
-            if keys.iter().any(|key| matches!(key, Key::Orthographic)) {
+            if input.was_pressed(Key::Orthographic) {
                 self.camera.toggle_projection();
                 changed = true;
             }
@@ -200,15 +206,14 @@ impl App {
                 }
                 AppPhase::Ready => {
                     changed |= handle_ready_input(
-                        keys,
-                        window,
+                        input,
                         &mut self.game,
                         &mut self.camera,
                         &mut self.phase,
                     );
                 }
                 AppPhase::Playing => {
-                    changed |= handle_playing_input(keys, window, &mut self.game, &mut self.camera);
+                    changed |= handle_playing_input(input, &mut self.game, &mut self.camera);
                     changed |= self.game.update(delta_seconds);
                     if self.game.game_over {
                         self.phase = AppPhase::Death { elapsed: 0.0 };
@@ -420,19 +425,19 @@ fn player_animation(
 }
 
 fn handle_ready_input(
-    keys: &[Key],
-    window: &NativeWindow,
+    input: &InputState,
     game: &mut Game,
     camera: &mut OrbitCamera,
     phase: &mut AppPhase,
 ) -> bool {
-    if keys.iter().any(|key| matches!(key, Key::Pause)) {
+    if input.was_pressed(Key::Pause) {
         game.toggle_pause();
     }
     if game.paused {
-        return handle_orbit_input(window, camera);
+        return handle_orbit_input(input, camera);
     }
-    if keys
+    if input
+        .pressed()
         .iter()
         .any(|key| matches!(key, Key::Start | Key::Left | Key::Right | Key::Down))
     {
@@ -442,20 +447,15 @@ fn handle_ready_input(
     false
 }
 
-fn handle_playing_input(
-    keys: &[Key],
-    window: &NativeWindow,
-    game: &mut Game,
-    camera: &mut OrbitCamera,
-) -> bool {
-    if keys.iter().any(|key| matches!(key, Key::Pause)) {
+fn handle_playing_input(input: &InputState, game: &mut Game, camera: &mut OrbitCamera) -> bool {
+    if input.was_pressed(Key::Pause) {
         game.toggle_pause();
     }
     if game.paused {
-        return handle_orbit_input(window, camera);
+        return handle_orbit_input(input, camera);
     }
     let mut changed = false;
-    for key in keys {
+    for key in input.pressed() {
         let direction = match key {
             Key::Left => Some(Move::Left),
             Key::Right => Some(Move::Right),
@@ -475,21 +475,21 @@ fn handle_playing_input(
     changed
 }
 
-fn handle_orbit_input(window: &NativeWindow, camera: &mut OrbitCamera) -> bool {
+fn handle_orbit_input(input: &InputState, camera: &mut OrbitCamera) -> bool {
     let mut changed = false;
-    if window.is_key_down(Key::Left) {
+    if input.is_held(Key::Left) {
         camera.orbit_y(-0.035);
         changed = true;
     }
-    if window.is_key_down(Key::Right) {
+    if input.is_held(Key::Right) {
         camera.orbit_y(0.035);
         changed = true;
     }
-    if window.is_key_down(Key::Up) {
+    if input.is_held(Key::Up) {
         camera.zoom(-0.18);
         changed = true;
     }
-    if window.is_key_down(Key::Down) {
+    if input.is_held(Key::Down) {
         camera.zoom(0.18);
         changed = true;
     }
