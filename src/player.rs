@@ -166,7 +166,7 @@ fn death_facing(camera_offset: Vec3) -> Vec3 {
     if horizontal.dot(horizontal) < 0.000_001 {
         Vec3::new(0.0, 0.0, -1.0)
     } else {
-        horizontal.normalize()
+        horizontal.normalize_or_zero()
     }
 }
 
@@ -240,8 +240,8 @@ fn tilt_character_back(
 fn rotate_back(vector: Vec3, facing: Vec3, angle: f32) -> Vec3 {
     const UP: Vec3 = Vec3::new(0.0, 1.0, 0.0);
 
-    let facing = facing.normalize();
-    let right = facing.cross(&UP).normalize();
+    let facing = facing.normalize_or_zero();
+    let right = facing.cross(UP).normalize_or_zero();
     let side = right * vector.dot(right);
     let vertical = vector.dot(UP);
     let forward = vector.dot(facing);
@@ -261,8 +261,8 @@ fn add_contact_shadow(scene: &mut Scene, center: Vec3) {
 fn transform_local(base: Vec3, local: Vec3, facing: Vec3) -> Vec3 {
     const UP: Vec3 = Vec3::new(0.0, 1.0, 0.0);
 
-    let facing = facing.normalize();
-    let right = facing.cross(&UP).normalize();
+    let facing = facing.normalize_or_zero();
+    let right = facing.cross(UP).normalize_or_zero();
     base + right * local.x + UP * local.y + facing * local.z
 }
 
@@ -325,14 +325,14 @@ fn eye_center(base: Vec3, facing: Vec3, side: f32) -> Vec3 {
     const UP: Vec3 = Vec3::new(0.0, 1.0, 0.0);
 
     let head_center = transform_character_local(base, Vec3::new(0.0, 3.41, 0.0), facing);
-    let right = facing.normalize().cross(&UP).normalize();
+    let right = facing.normalize_or_zero().cross(UP).normalize_or_zero();
     head_center + right * scaled(EYE_LATERAL_OFFSET * side)
 }
 
 fn add_eye(scene: &mut Scene, base: Vec3, facing: Vec3, side: f32, palette: &CharacterPalette) {
     const UP: Vec3 = Vec3::new(0.0, 1.0, 0.0);
 
-    let right = facing.normalize().cross(&UP).normalize();
+    let right = facing.normalize_or_zero().cross(UP).normalize_or_zero();
     let center = eye_center(base, facing, side);
     scene.cylinders.push(Cylinder::new_between_with_material(
         center - right * scaled(EYE_HALF_THICKNESS),
@@ -353,7 +353,7 @@ fn add_left_eye(scene: &mut Scene, base: Vec3, facing: Vec3, palette: &Character
 fn add_pupil(scene: &mut Scene, base: Vec3, facing: Vec3, side: f32, palette: &CharacterPalette) {
     const UP: Vec3 = Vec3::new(0.0, 1.0, 0.0);
 
-    let right = facing.normalize().cross(&UP).normalize();
+    let right = facing.normalize_or_zero().cross(UP).normalize_or_zero();
     let center = eye_center(base, facing, side) + right * scaled(PUPIL_OUTWARD_OFFSET * side);
     scene.cylinders.push(Cylinder::new_between_with_material(
         center - right * scaled(PUPIL_HALF_THICKNESS),
@@ -600,7 +600,7 @@ fn add_foot(
     pose: CharacterPose,
 ) {
     let center = transform_character_local(base, foot_center(side, pose), facing);
-    let facing = facing.normalize();
+    let facing = facing.normalize_or_zero();
     let size = if facing.x.abs() > facing.z.abs() {
         Vec3::new(0.42, 0.18, 0.28)
     } else {

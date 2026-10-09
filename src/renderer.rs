@@ -237,7 +237,7 @@ pub fn render(
     forest_props: &[ForestProp],
     resources: RenderResources<'_>,
 ) {
-    let light_direction = Vec3::new(-0.45, 0.85, 0.35).normalize();
+    let light_direction = Vec3::new(-0.45, 0.85, 0.35).normalize_or_zero();
     let width = framebuffer.width;
     let height = framebuffer.height;
     let ray_grid = camera.ray_grid(width, height);
@@ -465,8 +465,9 @@ fn trace_primary(
     }
 
     if material.reflectivity > 0.0 {
-        let reflected_direction =
-            (ray.direction - hit.normal * (2.0 * ray.direction.dot(hit.normal))).normalize();
+        let reflected_direction = (ray.direction
+            - hit.normal * (2.0 * ray.direction.dot(hit.normal)))
+        .normalize_or_zero();
         let reflected_ray = Ray::new(hit_point + hit.normal * 0.002, reflected_direction);
         let reflected = closest_hit(&reflected_ray, scene, 0.001)
             .map(|(reflected_hit, reflected_material)| {
@@ -525,7 +526,7 @@ fn refract(direction: Vec3, normal: Vec3, material_index: f32) -> Option<Vec3> {
     Some(
         (direction * ratio
             + interface_normal * (ratio * cosine - (1.0 - perpendicular_squared).sqrt()))
-        .normalize(),
+        .normalize_or_zero(),
     )
 }
 

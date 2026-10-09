@@ -49,7 +49,7 @@ impl CameraRayGrid {
 impl CameraRayRow {
     pub fn next(&mut self) -> Ray {
         let ray = if self.perspective {
-            Ray::new(self.eye, self.sample.normalize())
+            Ray::new(self.eye, self.sample.normalize_or_zero())
         } else {
             Ray::new(self.sample, self.forward)
         };
@@ -71,15 +71,15 @@ impl OrbitCamera {
 
     #[cfg(test)]
     pub fn ray_direction(&self, x: usize, y: usize, width: usize, height: usize) -> Vec3 {
-        let forward = (self.target - self.eye).normalize();
-        let right = forward.cross(&self.up).normalize();
-        let camera_up = right.cross(&forward);
+        let forward = (self.target - self.eye).normalize_or_zero();
+        let right = forward.cross(self.up).normalize_or_zero();
+        let camera_up = right.cross(forward);
         let aspect = width as f32 / height as f32;
         let scale = (self.fov_y * 0.5).tan();
         let screen_x = (2.0 * (x as f32 + 0.5) / width as f32 - 1.0) * aspect * scale;
         let screen_y = (1.0 - 2.0 * (y as f32 + 0.5) / height as f32) * scale;
 
-        (forward + right * screen_x + camera_up * screen_y).normalize()
+        (forward + right * screen_x + camera_up * screen_y).normalize_or_zero()
     }
 
     #[cfg(test)]
@@ -92,9 +92,9 @@ impl OrbitCamera {
     }
 
     pub fn ray_grid(&self, width: usize, height: usize) -> CameraRayGrid {
-        let forward = (self.target - self.eye).normalize();
-        let right = forward.cross(&self.up).normalize();
-        let camera_up = right.cross(&forward);
+        let forward = (self.target - self.eye).normalize_or_zero();
+        let right = forward.cross(self.up).normalize_or_zero();
+        let camera_up = right.cross(forward);
         let aspect = width as f32 / height as f32;
         let half_height = if self.projection == Projection::Perspective {
             (self.fov_y * 0.5).tan()
@@ -148,7 +148,7 @@ impl OrbitCamera {
         let offset = self.eye - self.target;
         let distance = offset.dot(offset).sqrt();
         let new_distance = (distance + amount).clamp(5.0, 30.0);
-        self.eye = self.target + offset.normalize() * new_distance;
+        self.eye = self.target + offset.normalize_or_zero() * new_distance;
     }
 }
 

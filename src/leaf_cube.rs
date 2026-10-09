@@ -26,7 +26,7 @@ impl LeafCube {
     ) -> Self {
         let forward = Vec3::new(yaw.cos() * tilt.cos(), tilt.sin(), yaw.sin() * tilt.cos());
         let base_right = Vec3::new(-yaw.sin(), 0.0, yaw.cos());
-        let base_up = base_right.cross(&forward).normalize();
+        let base_up = base_right.cross(forward).normalize_or_zero();
         let right = base_right * roll.cos() + base_up * roll.sin();
         let up = base_up * roll.cos() - base_right * roll.sin();
         Self {

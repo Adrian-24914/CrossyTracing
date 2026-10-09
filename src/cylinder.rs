@@ -61,9 +61,9 @@ impl Cylinder {
     }
 
     pub fn rotate_orientation(&mut self, mut rotate: impl FnMut(Vec3) -> Vec3) {
-        self.axis = rotate(self.axis).normalize();
+        self.axis = rotate(self.axis).normalize_or_zero();
         for normal in &mut self.side_normals {
-            *normal = rotate(*normal).normalize();
+            *normal = rotate(*normal).normalize_or_zero();
         }
     }
 
@@ -136,8 +136,8 @@ fn hexagon_side_normals(axis: Vec3) -> [Vec3; 3] {
     } else {
         Vec3::new(1.0, 0.0, 0.0)
     };
-    let first = axis.cross(&reference).normalize();
-    let second = axis.cross(&first).normalize();
+    let first = axis.cross(reference).normalize_or_zero();
+    let second = axis.cross(first).normalize_or_zero();
     const COS_60: f32 = 0.5;
     const SIN_60: f32 = 0.866_025_4;
 
