@@ -39,10 +39,12 @@ El contenido generado queda en `web/pkg/` y no se guarda en Git.
 ### Iniciar el servidor local
 
 ```powershell
-python -m http.server 8000 --directory web
+python -m http.server 8000
 ```
 
-Después abre [http://127.0.0.1:8000](http://127.0.0.1:8000) en el navegador. Para detener el servidor utiliza `Ctrl+C`.
+Después abre [http://127.0.0.1:8000/web/](http://127.0.0.1:8000/web/) en el navegador. El servidor se inicia desde la raíz para que el juego también pueda cargar los archivos de `assets/audio/`. Para detenerlo utiliza `Ctrl+C`.
+
+La música comienza después de la primera tecla o clic dentro de la página, debido a la política de reproducción automática de los navegadores.
 
 El archivo `web/index.html` no debe abrirse directamente desde el explorador de archivos: los módulos JavaScript y WebAssembly necesitan servirse mediante HTTP.
 

@@ -15,20 +15,31 @@ rayon = "1.12.0"
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = "0.3"
 wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies.web-sys]
 version = "0.3"
 features = [
+    "AudioBuffer",
+    "AudioBufferSourceNode",
+    "AudioContext",
+    "AudioDestinationNode",
+    "AudioNode",
+    "AudioParam",
+    "AudioScheduledSourceNode",
     "CanvasRenderingContext2d",
+    "console",
     "CssStyleDeclaration",
     "Document",
     "Event",
     "EventTarget",
+    "GainNode",
     "HtmlCanvasElement",
     "HtmlElement",
     "ImageData",
     "KeyboardEvent",
     "Performance",
+    "Response",
     "Window",
 ]
 
