@@ -7,10 +7,10 @@ use crate::{
         TrainDirection,
     },
 };
-use std::{
-    collections::VecDeque,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::collections::VecDeque;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const GRID_SIZE: usize = 7;
 pub const TILE_COLUMNS: usize = GRID_SIZE;
@@ -89,11 +89,7 @@ pub struct Game {
 
 impl Game {
     pub fn new() -> Self {
-        let seed = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|duration| duration.as_nanos() as u64)
-            .unwrap_or(0xC0FFEE);
-        Self::with_seed(seed)
+        Self::with_seed(runtime_seed())
     }
 
     fn with_seed(seed: u64) -> Self {
@@ -868,6 +864,20 @@ impl Game {
             _ => 0.54,
         }
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn runtime_seed() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos() as u64)
+        .unwrap_or(0xC0FFEE)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn runtime_seed() -> u64 {
+    let milliseconds = js_sys::Date::now();
+    milliseconds.to_bits() ^ (milliseconds as u64).rotate_left(17)
 }
 
 fn decoration_value(seed: &mut u64) -> usize {

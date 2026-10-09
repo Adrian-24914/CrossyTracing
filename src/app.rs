@@ -12,16 +12,21 @@ use crate::{
     skybox::Skybox,
     ui::{self, DioramaEffect, UiAssets},
 };
-use std::{
-    f32::consts::FRAC_PI_4,
-    time::{Duration, Instant},
-};
+use std::{f32::consts::FRAC_PI_4, time::Duration};
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Instant;
 
 pub const TARGET_FPS: u32 = 30;
 const INTRO_HOLD_SECONDS: f32 = 1.0;
 const INTRO_RISE_SECONDS: f32 = 1.45;
 const INTRO_DURATION_SECONDS: f32 = INTRO_HOLD_SECONDS + INTRO_RISE_SECONDS;
 const DEATH_FADE_SECONDS: f32 = 0.65;
+
+#[cfg(not(target_arch = "wasm32"))]
+type RenderTimer = Instant;
+#[cfg(target_arch = "wasm32")]
+type RenderTimer = f64;
 
 enum AppPhase {
     Intro { elapsed: f32 },
@@ -246,7 +251,7 @@ impl App {
 
     pub fn render(&mut self) {
         if self.needs_render {
-            let render_started = Instant::now();
+            let render_started = start_render_timer();
             self.scene = scene::build_scene_with_player(
                 &self.game,
                 player_animation(&self.game, &self.phase, &self.camera),
@@ -290,7 +295,7 @@ impl App {
         self.death_background = None;
     }
 
-    fn render_current_scene(&mut self, render_started: Option<Instant>) {
+    fn render_current_scene(&mut self, render_started: Option<RenderTimer>) {
         renderer::render(
             &mut self.framebuffer,
             &self.camera,
@@ -317,7 +322,7 @@ impl App {
         }
 
         if let Some(render_started) = render_started {
-            let render_elapsed = render_started.elapsed();
+            let render_elapsed = elapsed_render_time(render_started);
             self.performance.record(render_elapsed);
             self.pending_render_size = self.adaptive_quality.observe(
                 self.display_preset,
@@ -354,6 +359,26 @@ impl App {
             );
         }
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn start_render_timer() -> RenderTimer {
+    Instant::now()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn start_render_timer() -> RenderTimer {
+    js_sys::Date::now()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn elapsed_render_time(started: RenderTimer) -> Duration {
+    started.elapsed()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn elapsed_render_time(started: RenderTimer) -> Duration {
+    Duration::from_secs_f64(((js_sys::Date::now() - started) / 1_000.0).max(0.0))
 }
 
 fn adjacent_render_size(

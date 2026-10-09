@@ -26,9 +26,32 @@
         aspect-ratio: 4 / 3;
         background: #000;
       }
+
+      #status {
+        position: fixed;
+        inset: auto 0 1rem;
+        margin: 0;
+        color: #fff;
+        font: 14px system-ui, sans-serif;
+        text-align: center;
+      }
     </style>
   </head>
   <body>
     <canvas id="game" width="816" height="612" aria-label="Crossy Tracing"></canvas>
+    <p id="status">Cargando Crossy Tracing…</p>
+    <script type="module">
+      import init from "./pkg/crossy_tracing.js";
+
+      const status = document.querySelector("#status");
+
+      try {
+        await init();
+        status.remove();
+      } catch (error) {
+        console.error(error);
+        status.textContent = "No se pudo iniciar el juego.";
+      }
+    </script>
   </body>
 </html>
