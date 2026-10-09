@@ -3,6 +3,10 @@ name = "creative_zone"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "crossy_tracing"
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

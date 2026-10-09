@@ -1,39 +1,15 @@
-mod app;
-mod audio;
-mod color;
-mod cube;
-mod cylinder;
-mod display;
-mod framebuffer;
-mod game;
-mod input;
-mod leaf_cube;
-mod material;
-mod math;
-mod obstacle;
-mod orbit_camera;
-mod player;
-mod random;
-mod ray;
-mod renderer;
-mod scene;
-mod skybox;
-mod sphere;
-mod train;
-mod tree;
-mod ui;
-mod window;
-mod world;
-
-use app::App;
+#[cfg(not(target_arch = "wasm32"))]
+use crossy_tracing::{App, NativeWindow};
+#[cfg(not(target_arch = "wasm32"))]
 use std::{
     thread,
     time::{Duration, Instant},
 };
-use window::NativeWindow;
 
+#[cfg(not(target_arch = "wasm32"))]
 const TARGET_FRAME_DURATION: Duration = Duration::from_micros(33_333);
 
+#[cfg(not(target_arch = "wasm32"))]
 fn main() {
     let (window_width, window_height) = App::initial_window_size();
     let window = NativeWindow::new("Crossy Tracing - Raytracing", window_width, window_height);
@@ -56,15 +32,15 @@ fn main() {
         app.render();
         window.set_title(&app.window_title());
         let framebuffer = app.framebuffer();
-        window.present_scaled(
-            &framebuffer.color,
-            framebuffer.width,
-            framebuffer.height,
-        );
+        window.present_scaled(&framebuffer.color, framebuffer.width, framebuffer.height);
         wait_for_target_frame(frame_started);
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+fn main() {}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn wait_for_target_frame(started: Instant) {
     let elapsed = started.elapsed();
     if elapsed >= TARGET_FRAME_DURATION {
