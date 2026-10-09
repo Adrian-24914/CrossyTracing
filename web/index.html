@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Crossy Tracing</title>
+    <style>
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: #000;
+      }
+
+      body {
+        display: grid;
+        place-items: center;
+      }
+
+      #game {
+        display: block;
+        max-width: 100vw;
+        max-height: 100vh;
+        aspect-ratio: 4 / 3;
+        background: #000;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="game" width="816" height="612" aria-label="Crossy Tracing"></canvas>
+  </body>
+</html>

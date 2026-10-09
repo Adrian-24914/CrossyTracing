@@ -16,8 +16,12 @@ wasm-bindgen = "0.2"
 version = "0.3"
 features = [
     "CanvasRenderingContext2d",
+    "CssStyleDeclaration",
     "Document",
+    "Event",
+    "EventTarget",
     "HtmlCanvasElement",
+    "HtmlElement",
     "ImageData",
     "KeyboardEvent",
     "Performance",
