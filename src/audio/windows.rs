@@ -24,22 +24,22 @@ use crate::game::SoundEvent;
 //      750  = alto
 //      1000 = maximo
 //
-// IMPORTANTE:
-// El volumen de MUSIC no se modifica actualmente mediante
-// `setaudio`, porque este comando dio problemas con music.wav.
-// La constante se deja aqui preparada para una futura mejora.
+// --------------------------
+// MUSICA
+// --------------------------
 
+const MUSIC_VOLUME: u32 = 220;
 
 // --------------------------
 // EFECTOS
 // --------------------------
 
-const GRASS_VOLUME: u32 = 80;
-const ROCKS_VOLUME: u32 = 120;
-const LOG_WATER_VOLUME: u32 = 200;
-const RAIL_VOLUME: u32 = 120;
-const TRAIN_WARNING_VOLUME: u32 = 120;
-const TRAIN_VOLUME: u32 = 120;
+const GRASS_VOLUME: u32 = 220;
+const ROCKS_VOLUME: u32 = 300;
+const LOG_WATER_VOLUME: u32 = 420;
+const RAIL_VOLUME: u32 = 300;
+const TRAIN_WARNING_VOLUME: u32 = 320;
+const TRAIN_VOLUME: u32 = 360;
 
 // ============================================================
 // CONFIGURACION DE ARCHIVOS
@@ -108,7 +108,7 @@ impl Audio {
     // CONTROL DE MUSICA
     // ========================================================
 
-    pub fn sync_music(&mut self, _should_play: bool, paused: bool) {
+    pub fn sync_music(&mut self, paused: bool) {
         // Si la musica no esta funcionando,
         // intentar iniciarla nuevamente.
         if !self.music_running {
@@ -318,7 +318,11 @@ impl Drop for Audio {
 fn start_music() -> bool {
     command("seek music to start");
 
-    command("play music")
+    let started = command("play music");
+    if started {
+        set_volume("music", MUSIC_VOLUME, 1.0);
+    }
+    started
 }
 
 // ============================================================

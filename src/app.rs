@@ -241,10 +241,7 @@ impl App {
         }
 
         self.needs_render |= changed;
-        self.audio.sync_music(
-            !matches!(&self.phase, AppPhase::Death { .. }),
-            self.game.paused,
-        );
+        self.audio.sync_music(self.game.paused);
         if matches!(&self.phase, AppPhase::Playing) {
             for event in self.game.drain_sound_events() {
                 self.audio.play(event);

@@ -15,6 +15,7 @@ const LOG_WATER_URL: &str = "/assets/audio/log_water.wav";
 const RAIL_URL: &str = "/assets/audio/rail.wav";
 const TRAIN_WARNING_URL: &str = "/assets/audio/train_warning.wav";
 const TRAIN_URL: &str = "/assets/audio/train.wav";
+const MUSIC_VOLUME: f32 = 0.22;
 
 #[derive(Clone, Copy)]
 enum AudioAsset {
@@ -73,10 +74,10 @@ struct AudioState {
     context: AudioContext,
     buffers: AudioBuffers,
     music_source: Option<AudioBufferSourceNode>,
+    _music_gain: Option<GainNode>,
     active_effects: Vec<ActiveEffect>,
     unlocked: bool,
     suspended: bool,
-    should_play_music: bool,
     paused: bool,
 }
 
@@ -91,8 +92,7 @@ impl AudioState {
         self.apply_music_state();
     }
 
-    fn sync_music(&mut self, should_play: bool, paused: bool) {
-        self.should_play_music = should_play;
+    fn sync_music(&mut self, paused: bool) {
         self.paused = paused;
         if !self.unlocked {
             return;
@@ -112,10 +112,6 @@ impl AudioState {
         if !self.unlocked || self.paused {
             return;
         }
-        if !self.should_play_music {
-            self.stop_music();
-            return;
-        }
         if self.music_source.is_some() {
             return;
         }
@@ -125,21 +121,20 @@ impl AudioState {
         let Ok(source) = self.context.create_buffer_source() else {
             return;
         };
+        let Ok(gain) = self.context.create_gain() else {
+            return;
+        };
         source.set_buffer(Some(buffer));
         source.set_loop(true);
-        if source
-            .connect_with_audio_node(&self.context.destination())
-            .is_ok()
+        gain.gain().set_value(MUSIC_VOLUME);
+        if source.connect_with_audio_node(&gain).is_ok()
+            && gain
+                .connect_with_audio_node(&self.context.destination())
+                .is_ok()
             && source.start().is_ok()
         {
             self.music_source = Some(source);
-        }
-    }
-
-    fn stop_music(&mut self) {
-        if let Some(source) = self.music_source.take() {
-            stop_source(&source);
-            let _ = source.disconnect();
+            self._music_gain = Some(gain);
         }
     }
 
@@ -218,10 +213,10 @@ impl Audio {
             context,
             buffers: AudioBuffers::default(),
             music_source: None,
+            _music_gain: None,
             active_effects: Vec::new(),
             unlocked: false,
             suspended: true,
-            should_play_music: true,
             paused: false,
         }));
 
@@ -258,8 +253,8 @@ impl Audio {
         }
     }
 
-    pub fn sync_music(&mut self, should_play: bool, paused: bool) {
-        self.state.borrow_mut().sync_music(should_play, paused);
+    pub fn sync_music(&mut self, paused: bool) {
+        self.state.borrow_mut().sync_music(paused);
     }
 
     pub fn update(&mut self, delta_seconds: f32) {
@@ -315,12 +310,12 @@ async fn fetch_audio_buffer(context: &AudioContext, url: &str) -> Result<AudioBu
 
 fn effect_settings(event: SoundEvent) -> (f32, f32, f32, f32) {
     match event {
-        SoundEvent::GrassLanding => (0.50, 0.035, 0.07, 0.08),
-        SoundEvent::RockLanding => (0.50, 0.035, 0.07, 0.12),
-        SoundEvent::LogLanding => (0.55, 0.040, 0.08, 0.20),
-        SoundEvent::RailLanding => (0.50, 0.035, 0.07, 0.12),
-        SoundEvent::TrainWarning => (2.00, 0.12, 0.16, 0.12),
-        SoundEvent::TrainCrossing => (2.50, 0.12, 0.20, 0.12),
+        SoundEvent::GrassLanding => (0.50, 0.035, 0.07, 0.22),
+        SoundEvent::RockLanding => (0.50, 0.035, 0.07, 0.30),
+        SoundEvent::LogLanding => (0.55, 0.040, 0.08, 0.42),
+        SoundEvent::RailLanding => (0.50, 0.035, 0.07, 0.30),
+        SoundEvent::TrainWarning => (2.00, 0.12, 0.16, 0.32),
+        SoundEvent::TrainCrossing => (2.50, 0.12, 0.20, 0.36),
     }
 }
 
