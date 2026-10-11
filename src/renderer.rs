@@ -80,6 +80,12 @@ struct BvhNode {
     count: usize,
 }
 
+#[derive(Clone, Copy)]
+struct TraversalEntry {
+    node: usize,
+    near: f32,
+}
+
 struct TraceScene<'a> {
     cubes: &'a [Cube],
     spheres: &'a [Sphere],
@@ -303,20 +309,24 @@ fn closest_hit_filtered(
     let Some(root) = scene.root else {
         return None;
     };
-    let mut stack = [0_usize; 64];
+    let root_near = ray_bounds_near(ray, scene.nodes[root].bounds, f32::INFINITY)?;
+    let mut stack = [TraversalEntry {
+        node: root,
+        near: root_near,
+    }; 64];
     let mut stack_length = 1;
-    stack[0] = root;
 
     while stack_length > 0 {
         stack_length -= 1;
-        let node = &scene.nodes[stack[stack_length]];
+        let entry = stack[stack_length];
         let maximum_distance = closest
             .as_ref()
             .map(|(hit, _)| hit.distance)
             .unwrap_or(f32::INFINITY);
-        if ray_bounds_near(ray, node.bounds, maximum_distance).is_none() {
+        if entry.near > maximum_distance {
             continue;
         }
+        let node = &scene.nodes[entry.node];
 
         if node.count > 0 {
             for bounded in &scene.objects[node.start..node.start + node.count] {
@@ -343,20 +353,44 @@ fn closest_hit_filtered(
         match (left_near, right_near) {
             (Some(left_distance), Some(right_distance)) => {
                 let (near, far) = if left_distance <= right_distance {
-                    (node.left, node.right)
+                    (
+                        TraversalEntry {
+                            node: node.left,
+                            near: left_distance,
+                        },
+                        TraversalEntry {
+                            node: node.right,
+                            near: right_distance,
+                        },
+                    )
                 } else {
-                    (node.right, node.left)
+                    (
+                        TraversalEntry {
+                            node: node.right,
+                            near: right_distance,
+                        },
+                        TraversalEntry {
+                            node: node.left,
+                            near: left_distance,
+                        },
+                    )
                 };
                 stack[stack_length] = far;
                 stack[stack_length + 1] = near;
                 stack_length += 2;
             }
-            (Some(_), None) => {
-                stack[stack_length] = node.left;
+            (Some(left_distance), None) => {
+                stack[stack_length] = TraversalEntry {
+                    node: node.left,
+                    near: left_distance,
+                };
                 stack_length += 1;
             }
-            (None, Some(_)) => {
-                stack[stack_length] = node.right;
+            (None, Some(right_distance)) => {
+                stack[stack_length] = TraversalEntry {
+                    node: node.right,
+                    near: right_distance,
+                };
                 stack_length += 1;
             }
             (None, None) => {}
@@ -591,6 +625,9 @@ fn forest_shadow_hit(ray: &Ray, scene: &TraceScene<'_>) -> bool {
     let Some(root) = scene.shadow_root else {
         return false;
     };
+    if ray_bounds_near(ray, scene.shadow_nodes[root].bounds, f32::INFINITY).is_none() {
+        return false;
+    }
     let mut stack = [0_usize; 64];
     let mut stack_length = 1;
     stack[0] = root;
@@ -598,9 +635,6 @@ fn forest_shadow_hit(ray: &Ray, scene: &TraceScene<'_>) -> bool {
     while stack_length > 0 {
         stack_length -= 1;
         let node = &scene.shadow_nodes[stack[stack_length]];
-        if ray_bounds_near(ray, node.bounds, f32::INFINITY).is_none() {
-            continue;
-        }
 
         if node.count > 0 {
             for bounded in &scene.shadow_objects[node.start..node.start + node.count] {
@@ -614,9 +648,29 @@ fn forest_shadow_hit(ray: &Ray, scene: &TraceScene<'_>) -> bool {
             continue;
         }
 
-        stack[stack_length] = node.left;
-        stack[stack_length + 1] = node.right;
-        stack_length += 2;
+        let left_near = ray_bounds_near(ray, scene.shadow_nodes[node.left].bounds, f32::INFINITY);
+        let right_near = ray_bounds_near(ray, scene.shadow_nodes[node.right].bounds, f32::INFINITY);
+        match (left_near, right_near) {
+            (Some(left_distance), Some(right_distance)) => {
+                let (near, far) = if left_distance <= right_distance {
+                    (node.left, node.right)
+                } else {
+                    (node.right, node.left)
+                };
+                stack[stack_length] = far;
+                stack[stack_length + 1] = near;
+                stack_length += 2;
+            }
+            (Some(_), None) => {
+                stack[stack_length] = node.left;
+                stack_length += 1;
+            }
+            (None, Some(_)) => {
+                stack[stack_length] = node.right;
+                stack_length += 1;
+            }
+            (None, None) => {}
+        }
     }
     false
 }
